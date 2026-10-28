@@ -536,42 +536,50 @@ export const InterviewView: React.FC<InterviewViewProps> = ({
 
   // 3. Default: Broadcast Booth Setup Screen
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-8 studio-grid-bg">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <div className="inline-flex items-center space-x-2 text-[11px] font-mono-code uppercase tracking-widest text-rose-400 mb-1">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 space-y-8">
+      {/* Photo Hero Banner */}
+      <div className="relative rounded-[32px] overflow-hidden border border-white/15 shadow-2xl p-8 sm:p-12">
+        <img
+          src="/media/photo-interview.jpg"
+          alt="Interview studio microphone"
+          className="absolute inset-0 w-full h-full object-cover filter brightness-[0.4] saturate-125"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/65 to-transparent" />
+
+        <div className="relative z-10 max-w-xl space-y-4">
+          <span className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-400/40 text-rose-300 text-xs font-bold">
             <Radio className="h-3.5 w-3.5" />
-            <span>CHANNEL 05 // VOICE INTERVIEW STUDIO</span>
-          </div>
-          <h2 className="font-display text-3xl font-extrabold text-white tracking-tight">
-            Broadcast Mock Mentor{" "}
+            <span>Step 4 • Live Voice Interview Practice</span>
+          </span>
+          <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+            Practice Interviews{" "}
             <span className="font-editorial italic font-normal text-amber-300">
-              Live Simulation
+              Out Loud
             </span>
           </h2>
-          <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
-            Extracts your technical profile from an uploaded PDF and conducts a real-time adaptive voice & text interview with parallel instant grading.
+          <p className="text-sm sm:text-base text-zinc-200 leading-relaxed">
+            Pick a job role below, speak your answers into the mic (or type them), and get friendly coaching and a score out of 5 after every question.
           </p>
-        </div>
 
-        {/* Role Quick Presets */}
-        <div className="flex flex-wrap gap-1.5">
-          {ROLE_PRESETS.map((preset) => (
-            <button
-              key={preset.title}
-              onClick={() => {
-                setJobTitle(preset.title);
-                setJobDescription(preset.desc);
-              }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                jobTitle === preset.title
-                  ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
-                  : "bg-[#0c0e14] border-white/[0.07] text-zinc-400 hover:text-white"
-              }`}
-            >
-              {preset.title}
-            </button>
-          ))}
+          {/* Role Quick Presets */}
+          <div className="flex flex-wrap gap-2 pt-1">
+            {ROLE_PRESETS.map((preset) => (
+              <button
+                key={preset.title}
+                onClick={() => {
+                  setJobTitle(preset.title);
+                  setJobDescription(preset.desc);
+                }}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                  jobTitle === preset.title
+                    ? "bg-amber-400 border-amber-300 text-black shadow"
+                    : "bg-black/60 backdrop-blur-md border-white/20 text-zinc-200 hover:text-white"
+                }`}
+              >
+                {preset.title}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

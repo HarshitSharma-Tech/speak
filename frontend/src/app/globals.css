@@ -1,18 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #06070a;
-  --foreground: #f4f4f6;
-  --card: #0c0e14;
-  --card-border: rgba(255, 255, 255, 0.08);
-  --accent-amber: #f59e0b;
-  --accent-emerald: #10b981;
-  --accent-coral: #f43f5e;
+  --background: #050608;
+  --foreground: #f8fafc;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background-color: #06070a;
-  color: #f4f4f6;
+  background-color: #050608;
+  color: #f8fafc;
   font-family: var(--font-jakarta), system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
   min-height: 100vh;
@@ -32,16 +31,16 @@ body {
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #06070a;
+  background: #07090e;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #222634;
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 9999px;
 }
 
@@ -49,37 +48,89 @@ body {
   background: #f59e0b;
 }
 
-/* Studio Bento Surface */
+/* Frosted Glass Cards over Photo & Video Backdrops */
 .glass-panel {
-  background: linear-gradient(165deg, rgba(18, 21, 30, 0.88) 0%, rgba(10, 12, 18, 0.94) 100%);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  background: rgba(12, 15, 24, 0.72);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 60px -15px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
 }
 
 .glass-panel-hover {
-  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-panel-hover:hover {
-  border-color: rgba(245, 158, 11, 0.35);
-  box-shadow: 0 24px 48px -12px rgba(245, 158, 11, 0.12), inset 0 1px 0 0 rgba(245, 158, 11, 0.2);
-  transform: translateY(-3px);
+  border-color: rgba(251, 191, 36, 0.45);
+  box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.8), 0 0 35px -5px rgba(245, 158, 11, 0.22);
+  transform: translateY(-6px) scale(1.01);
 }
 
-/* Subtle architectural grid background */
-.studio-grid-bg {
-  background-image: 
-    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 48px 48px;
+/* Scroll-Reveal Transition Utilities */
+.reveal-on-scroll {
+  opacity: 0;
+  transform: translateY(44px) scale(0.97);
+  transition: opacity 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reveal-on-scroll.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* Floating animation for overlapping photo cards */
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(0.8deg);
+  }
+}
+
+.animate-float {
+  animation: float-slow 6s ease-in-out infinite;
+}
+
+@keyframes float-delayed {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(10px) rotate(-0.8deg);
+  }
+}
+
+.animate-float-delayed {
+  animation: float-delayed 7s ease-in-out infinite;
+}
+
+/* Infinite Smooth Marquee */
+@keyframes marquee-scroll {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee-scroll 32s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
 }
 
 /* Pulse animation for voice recording */
 @keyframes mic-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.65);
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.7);
   }
   70% {
     box-shadow: 0 0 0 18px rgba(244, 63, 94, 0);
@@ -93,10 +144,10 @@ body {
   animation: mic-pulse 1.6s infinite;
 }
 
-/* Audio Equalizer Bars for Broadcast Booth */
+/* Audio Equalizer Bars */
 @keyframes eq-bar {
   0%, 100% {
-    transform: scaleY(0.2);
+    transform: scaleY(0.25);
   }
   50% {
     transform: scaleY(1);
@@ -106,18 +157,4 @@ body {
 .animate-eq-bar {
   animation: eq-bar 0.9s ease-in-out infinite;
   transform-origin: bottom;
-}
-
-/* Shimmer effect */
-@keyframes shimmer-sweep {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-.animate-shimmer {
-  animation: shimmer-sweep 2.5s infinite;
 }

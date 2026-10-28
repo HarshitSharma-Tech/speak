@@ -126,21 +126,28 @@ export const SprintView: React.FC<SprintViewProps> = ({
   const filteredTasks = activeSprint?.tasks.filter((t) => taskFilter === "All" || t.task_type === taskFilter) || [];
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8 studio-grid-bg">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <span className="font-mono-code text-[11px] uppercase tracking-widest text-emerald-400 block mb-1">
-            CHANNEL 04 // EMPIRICAL EXAM PLANNER
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-10">
+      {/* Photo Hero Banner */}
+      <div className="relative rounded-[32px] overflow-hidden border border-white/15 shadow-2xl p-8 sm:p-12 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <img
+          src="/media/photo-exam.jpg"
+          alt="Exam planning desk"
+          className="absolute inset-0 w-full h-full object-cover filter brightness-[0.38] saturate-125"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/65 to-black/30" />
+
+        <div className="relative z-10 max-w-xl space-y-3">
+          <span className="px-3 py-1 rounded-full bg-sky-400/20 border border-sky-400/40 text-sky-300 text-xs font-bold">
+            Step 3 • Daily Exam Planner
           </span>
-          <h2 className="font-display text-3xl font-extrabold text-white tracking-tight">
-            Exam Frequency{" "}
+          <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+            Your Daily{" "}
             <span className="font-editorial italic font-normal text-amber-300">
-              Roadmap
+              Exam Plan
             </span>
           </h2>
-          <p className="text-sm text-zinc-400 mt-1">
-            PYQ frequency analysis, semantic cosine similarity topic ranking, and adaptive day-by-day study schedule.
+          <p className="text-sm sm:text-base text-zinc-200 leading-relaxed">
+            Tell us your exam date and study hours. We find the most repeated exam topics and give you a simple day-by-day checklist.
           </p>
         </div>
 
@@ -152,10 +159,10 @@ export const SprintView: React.FC<SprintViewProps> = ({
             if (pyq) setPyqId(pyq.id);
             setShowCreateModal(true);
           }}
-          className="px-5 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-extrabold shadow-lg shadow-amber-500/20 flex items-center space-x-2 transition-all self-start sm:self-auto"
+          className="relative z-10 px-6 py-4 rounded-2xl bg-amber-400 hover:bg-amber-300 text-black text-xs sm:text-sm font-extrabold shadow-xl shadow-amber-400/25 flex items-center space-x-2 shrink-0 self-start sm:self-auto transition-all"
         >
           <Plus className="h-4 w-4" />
-          <span>New Exam Roadmap</span>
+          <span>Create Exam Plan</span>
         </button>
       </div>
 

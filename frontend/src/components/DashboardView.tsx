@@ -2,26 +2,20 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import {
-  FileText,
-  GraduationCap,
-  CalendarDays,
+  Upload,
+  BookOpen,
+  Calendar,
   Mic,
   ArrowRight,
-  ArrowUpRight,
-  BookOpen,
   Play,
   Pause,
   Volume2,
   VolumeX,
-  Film,
-  Waves,
-  Compass,
   CheckCircle2,
-  Clock,
+  ChevronDown,
+  FileText,
   Award,
-  Flame,
-  Radio,
-  Layers
+  Clock
 } from "lucide-react";
 import { DocumentItem, CourseItem, SprintItem, InterviewSessionItem } from "@/lib/api";
 import { NavTab } from "./Navigation";
@@ -31,6 +25,7 @@ interface DashboardViewProps {
   courses: CourseItem[];
   sprints: SprintItem[];
   interviews: InterviewSessionItem[];
+  scrollY?: number;
   onNavigate: (tab: NavTab) => void;
   onSelectCourse: (courseId: string) => void;
   onSelectSprint: (sprintId: string) => void;
@@ -42,33 +37,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   courses,
   sprints,
   interviews,
+  scrollY = 0,
   onNavigate,
   onSelectCourse,
   onSelectSprint,
   onStartInterview,
 }) => {
-  // Hero Showcase Mode: "cinema" | "canvas" | "blueprint"
-  const [heroMode, setHeroMode] = useState<"cinema" | "canvas" | "blueprint">("cinema");
+  const [activeVideo, setActiveVideo] = useState<"study" | "cinema">("study");
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
-  const [videoProgress, setVideoProgress] = useState(0);
-  const [activeTourStep, setActiveTourStep] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Aggregate metrics
-  const totalChunks = documents.reduce((acc, d) => acc + (d.chunk_count || 0), 0);
-  const totalPages = documents.reduce((acc, d) => acc + (d.page_count || 0), 0);
-  const totalModules = courses.reduce((acc, c) => acc + (c.modules?.length || 0), 0);
+  // Scroll-reveal IntersectionObserver for all `.reveal-on-scroll` sections
+  useEffect(() => {
+    const elements = document.querySelectorAll(".reveal-on-scroll");
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+          }
+        });
+      },
+      { threshold: 0.14, rootMargin: "0px 0px -40px 0px" }
+    );
 
-  const activeSprint = sprints[0];
-  const sprintProgress = activeSprint ? activeSprint.progress_percentage : 0;
+    elements.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [courses.length, sprints.length, documents.length]);
 
-  const completedInterviews = interviews.filter((i) => i.state === "COMPLETED" && i.report);
-  const lastInterview = completedInterviews[0] || interviews[0];
-
-  // Toggle video play/pause
   const togglePlay = () => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
@@ -86,652 +84,434 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     setIsMuted(videoRef.current.muted);
   };
 
-  // Interactive 60FPS Neural & Harmonic Canvas when in "canvas" mode (or ambient overlay)
-  useEffect(() => {
-    if (heroMode !== "canvas") return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+  const activeSprint = sprints[0];
+  const lastInterview = interviews.find((i) => i.state === "COMPLETED" && i.report) || interviews[0];
 
-    let animId: number;
-    let width = (canvas.width = canvas.offsetWidth * window.devicePixelRatio);
-    let height = (canvas.height = canvas.offsetHeight * window.devicePixelRatio);
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-
-    const w = canvas.offsetWidth;
-    const h = canvas.offsetHeight;
-
-    const nodes = Array.from({ length: 38 }, (_, i) => ({
-      x: Math.random() * w,
-      y: Math.random() * h,
-      vx: (Math.random() - 0.5) * 0.9,
-      vy: (Math.random() - 0.5) * 0.9,
-      r: 2 + Math.random() * 2.5,
-      hue: i % 3 === 0 ? "#f59e0b" : i % 3 === 1 ? "#10b981" : "#f43f5e",
-    }));
-
-    let mouse = { x: w / 2, y: h / 2 };
-    const handleMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    };
-    canvas.addEventListener("mousemove", handleMove);
-
-    let tick = 0;
-    const render = () => {
-      tick += 0.025;
-      ctx.clearRect(0, 0, w, h);
-
-      // Draw harmonic wave lines in background
-      for (let wave = 0; wave < 3; wave++) {
-        ctx.beginPath();
-        ctx.strokeStyle =
-          wave === 0
-            ? "rgba(245, 158, 11, 0.16)"
-            : wave === 1
-            ? "rgba(16, 185, 129, 0.12)"
-            : "rgba(244, 63, 94, 0.12)";
-        ctx.lineWidth = 1.5;
-        for (let x = 0; x <= w; x += 12) {
-          const y =
-            h * 0.55 +
-            Math.sin(x * 0.008 + tick + wave * 1.4) * (28 + wave * 12) +
-            Math.cos(x * 0.004 - tick) * 14;
-          if (x === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-      }
-
-      // Update & connect nodes
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        n.x += n.vx;
-        n.y += n.vy;
-
-        if (n.x < 0 || n.x > w) n.vx *= -1;
-        if (n.y < 0 || n.y > h) n.vy *= -1;
-
-        // Subtle attraction to cursor
-        const dxMouse = mouse.x - n.x;
-        const dyMouse = mouse.y - n.y;
-        const distMouse = Math.hypot(dxMouse, dyMouse);
-        if (distMouse < 160) {
-          n.x += dxMouse * 0.008;
-          n.y += dyMouse * 0.008;
-        }
-
-        for (let j = i + 1; j < nodes.length; j++) {
-          const m = nodes[j];
-          const d = Math.hypot(n.x - m.x, n.y - m.y);
-          if (d < 120) {
-            ctx.beginPath();
-            ctx.strokeStyle = `rgba(245, 158, 11, ${(1 - d / 120) * 0.22})`;
-            ctx.lineWidth = 0.8;
-            ctx.moveTo(n.x, n.y);
-            ctx.lineTo(m.x, m.y);
-            ctx.stroke();
-          }
-        }
-
-        ctx.beginPath();
-        ctx.fillStyle = n.hue;
-        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      animId = requestAnimationFrame(render);
-    };
-
-    render();
-    return () => {
-      cancelAnimationFrame(animId);
-      canvas.removeEventListener("mousemove", handleMove);
-    };
-  }, [heroMode]);
-
-  const tourSteps = [
+  const featureStories = [
     {
-      step: "01",
-      title: "Source Archive & PDF Indexing",
-      caption: "Drop any textbook, past question paper, or resume. Every page is indexed with verbatim page & chunk citations.",
-      actionLabel: "Open Source Archive",
+      num: "01",
+      tag: "PDF TO EASY NOTES",
+      title: "Turn thick textbooks into clear, simple notes.",
+      desc: "Drop any PDF textbook, class handout, or resume. We break it into clean chapters and keep track of every page number for you.",
+      image: "/media/photo-library.jpg",
+      secondaryImage: "/media/photo-notes.jpg",
+      buttonText: "Upload a PDF",
       tab: "documents" as NavTab,
-      accent: "text-amber-400 border-amber-500/30 bg-amber-500/10",
+      stat: `${documents.length} PDFs Uploaded`,
+      accent: "from-amber-400 to-orange-500",
     },
     {
-      step: "02",
-      title: "Curriculum & Grounded 5-Q Quizzes",
-      caption: "Synthesize structured learning modules, rapid-revision decks, and 5-question quizzes verified against exact textbook pages.",
-      actionLabel: "Open Curriculum Lab",
+      num: "02",
+      tag: "COURSES & QUIZZES",
+      title: "Learn key ideas fast and test yourself in 2 minutes.",
+      desc: "Get bite-sized lessons, a 1-page formula cheat sheet, and a quick 5-question quiz for every chapter so you actually remember what you read.",
+      image: "/media/photo-courses.jpg",
+      secondaryImage: "/media/photo-hero-desk.jpg",
+      buttonText: "Explore My Courses",
       tab: "courses" as NavTab,
-      accent: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
+      stat: `${courses.length} Active Courses`,
+      accent: "from-emerald-400 to-teal-500",
     },
     {
-      step: "03",
-      title: "Exam Frequency Roadmap",
-      caption: "Cross-reference past exam papers against your syllabus to rank high-yield topics and build an adaptive daily calendar.",
-      actionLabel: "Open Exam Roadmap",
+      num: "03",
+      tag: "DAILY EXAM PLANNER",
+      title: "Know exactly what to study every single day.",
+      desc: "Pick your exam date and how many hours you have. We check past question papers to find the most important topics and build your daily checklist.",
+      image: "/media/photo-exam.jpg",
+      secondaryImage: "/media/photo-notes.jpg",
+      buttonText: "Build My Exam Plan",
       tab: "sprints" as NavTab,
-      accent: "text-cyan-400 border-cyan-500/30 bg-cyan-500/10",
+      stat: activeSprint ? `${activeSprint.progress_percentage}% Done` : "Ready to Plan",
+      accent: "from-sky-400 to-indigo-500",
     },
     {
-      step: "04",
-      title: "Live Voice Interview Booth",
-      caption: "Step into an adaptive technical & behavioral interview tailored to your resume with Web Speech voice recognition.",
-      actionLabel: "Enter Voice Booth",
+      num: "04",
+      tag: "VOICE INTERVIEW COACH",
+      title: "Practice real interviews out loud with your voice.",
+      desc: "Pick your dream job and speak your answers into the mic. Get friendly, instant feedback and a clear score out of 5 after every question.",
+      image: "/media/photo-interview.jpg",
+      secondaryImage: "/media/photo-courses.jpg",
+      buttonText: "Start Voice Interview",
       tab: "interviews" as NavTab,
-      accent: "text-rose-400 border-rose-500/30 bg-rose-500/10",
+      stat: lastInterview?.report ? `Best Score: ${lastInterview.report.overall_score}%` : "Voice & Text Ready",
+      accent: "from-rose-400 to-pink-600",
     },
   ];
 
   return (
-    <div className="p-6 lg:p-8 space-y-8 max-w-[1400px] mx-auto studio-grid-bg">
+    <div className="space-y-24">
       {/* =====================================================================
-          CINEMATIC VIDEO HERO SECTION
+          1. FULL-BLEED PARALLAX VIDEO & PHOTO HERO SECTION
       ===================================================================== */}
-      <section className="relative rounded-[28px] overflow-hidden border border-white/[0.1] bg-[#080a0f] shadow-[0_30px_90px_-20px_rgba(0,0,0,0.85)]">
-        {/* Background Media Layer */}
-        <div className="relative min-h-[460px] lg:min-h-[500px] w-full flex flex-col justify-between p-7 lg:p-10">
-          {/* 1. Cinema Video Reel Layer */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-2">
+        <div className="relative rounded-[36px] overflow-hidden border border-white/[0.15] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.9)] min-h-[560px] lg:min-h-[620px] flex flex-col justify-between p-6 sm:p-10 lg:p-14">
+          {/* Parallax Video & Photo Background Layer */}
           <div
-            className={`absolute inset-0 transition-opacity duration-700 ${
-              heroMode === "cinema" ? "opacity-100" : "opacity-20 pointer-events-none"
-            }`}
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              transform: `translateY(${scrollY * 0.18}px) scale(${1 + Math.min(0.12, scrollY * 0.0002)})`,
+            }}
           >
             <video
               ref={videoRef}
-              src="/videos/hero-reel.mp4"
+              key={activeVideo}
+              src={activeVideo === "study" ? "/media/study-ambient.mp4" : "/videos/hero-reel.mp4"}
+              poster="/media/photo-hero-desk.jpg"
               autoPlay
               loop
               muted={isMuted}
               playsInline
-              onTimeUpdate={() => {
-                if (videoRef.current && videoRef.current.duration) {
-                  setVideoProgress(
-                    (videoRef.current.currentTime / videoRef.current.duration) * 100
-                  );
-                }
-              }}
-              className="w-full h-full object-cover object-center scale-[1.02] filter saturate-[1.15] contrast-[1.08]"
+              className="w-full h-full object-cover object-center filter brightness-[0.65] contrast-[1.08] saturate-[1.15]"
             />
-            {/* Multi-stop editorial vignette & gradient masks */}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#06070a] via-[#06070a]/85 to-[#06070a]/35" />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#06070a] via-transparent to-[#06070a]/50" />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_35%,rgba(245,158,11,0.14),transparent_55%)]" />
+            {/* Warm cinematic gradient overlays */}
+            <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/65 to-black/25" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#050608] via-transparent to-black/40" />
           </div>
 
-          {/* 2. Interactive Harmonic Canvas Layer */}
-          {heroMode === "canvas" && (
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 w-full h-full z-0 cursor-crosshair"
-            />
-          )}
-
-          {/* Top Bar inside Hero: Scene Switcher & Live Telemetry */}
-          <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
-            <div className="inline-flex items-center space-x-2.5 px-3.5 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/[0.12]">
-              <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />
-              <span className="font-mono-code text-[11px] uppercase tracking-[0.16em] text-amber-300 font-semibold">
-                LEARNSYNC STUDIO // REEL 01
+          {/* Top Bar inside Hero: Simple Video Switcher */}
+          <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/20">
+              <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-xs font-semibold text-amber-200 tracking-wide">
+                Your Personal AI Study Partner
               </span>
             </div>
 
-            {/* Interactive Scene Switcher Pills */}
-            <div className="inline-flex items-center p-1 rounded-2xl bg-black/70 backdrop-blur-xl border border-white/[0.1]">
+            <div className="flex items-center space-x-2 bg-black/60 backdrop-blur-xl p-1.5 rounded-2xl border border-white/15">
               <button
-                onClick={() => setHeroMode("cinema")}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all ${
-                  heroMode === "cinema"
-                    ? "bg-amber-500 text-black shadow-md shadow-amber-500/20"
-                    : "text-zinc-400 hover:text-white"
+                onClick={() => setActiveVideo("study")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                  activeVideo === "study"
+                    ? "bg-amber-400 text-black shadow"
+                    : "text-zinc-300 hover:text-white"
                 }`}
               >
-                <Film className="h-3.5 w-3.5" />
-                <span>01 Cinema Reel</span>
+                Study Desk Video
               </button>
               <button
-                onClick={() => setHeroMode("canvas")}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all ${
-                  heroMode === "canvas"
-                    ? "bg-amber-500 text-black shadow-md shadow-amber-500/20"
-                    : "text-zinc-400 hover:text-white"
+                onClick={() => setActiveVideo("cinema")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                  activeVideo === "cinema"
+                    ? "bg-amber-400 text-black shadow"
+                    : "text-zinc-300 hover:text-white"
                 }`}
               >
-                <Waves className="h-3.5 w-3.5" />
-                <span>02 Harmonic Field</span>
+                Visual Reel
               </button>
-              <button
-                onClick={() => setHeroMode("blueprint")}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all ${
-                  heroMode === "blueprint"
-                    ? "bg-amber-500 text-black shadow-md shadow-amber-500/20"
-                    : "text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Compass className="h-3.5 w-3.5" />
-                <span>03 Studio Tour</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Center / Main Hero Content */}
-          {heroMode !== "blueprint" ? (
-            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-end my-auto py-6">
-              {/* Left Editorial Copy */}
-              <div className="lg:col-span-7 space-y-5">
-                <h2 className="font-display text-4xl sm:text-5xl lg:text-[54px] font-extrabold text-white tracking-tight leading-[1.06]">
-                  Where raw textbooks become{" "}
-                  <span className="font-editorial italic font-normal text-amber-300 underline decoration-amber-500/40 decoration-wavy underline-offset-8">
-                    living mastery.
-                  </span>
-                </h2>
-
-                <p className="text-sm sm:text-base text-zinc-300/90 leading-relaxed max-w-xl font-normal">
-                  An editorial study workspace engineered for deep comprehension. Distill dense PDFs into page-verified modules, rank exam questions by empirical frequency, and rehearse in a live voice interview booth.
-                </p>
-
-                {/* Primary Studio Actions */}
-                <div className="pt-2 flex flex-wrap items-center gap-3.5">
-                  <button
-                    onClick={() => onNavigate("documents")}
-                    className="group px-6 py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs tracking-wide transition-all shadow-[0_12px_30px_-8px_rgba(245,158,11,0.55)] flex items-center space-x-2.5"
-                  >
-                    <FileText className="h-4 w-4" />
-                    <span>Ingest PDF to Archive</span>
-                    <ArrowUpRight className="h-4 w-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                  </button>
-
-                  <button
-                    onClick={onStartInterview}
-                    className="px-5 py-3.5 rounded-2xl bg-white/[0.08] hover:bg-white/[0.14] backdrop-blur-md text-white font-semibold text-xs border border-white/[0.14] transition-all flex items-center space-x-2.5"
-                  >
-                    <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
-                    <Radio className="h-4 w-4 text-rose-400" />
-                    <span>Enter Live Voice Booth</span>
-                  </button>
-
-                  <button
-                    onClick={() => onNavigate("courses")}
-                    className="px-4 py-3.5 rounded-2xl bg-black/50 hover:bg-black/70 text-zinc-300 hover:text-white font-semibold text-xs border border-white/[0.08] transition-all flex items-center space-x-2"
-                  >
-                    <BookOpen className="h-4 w-4 text-emerald-400" />
-                    <span>Explore Curriculums ({courses.length})</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Right Floating Glass Monitor Card */}
-              <div className="lg:col-span-5">
-                <div className="p-5 rounded-3xl bg-black/65 backdrop-blur-2xl border border-white/[0.12] shadow-2xl space-y-4">
-                  <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
-                    <div className="flex items-center space-x-2">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                      <span className="font-mono-code text-[11px] uppercase tracking-wider text-zinc-300">
-                        LIVE WORKSPACE TELEMETRY
-                      </span>
-                    </div>
-                    <span className="font-mono-code text-[10px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                      GROUNDED RAG
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/[0.06]">
-                      <span className="font-mono-code text-[10px] text-zinc-400 block">INDEXED</span>
-                      <span className="font-display text-xl font-bold text-white">{totalPages}</span>
-                      <span className="text-[10px] text-zinc-500 block">PDF Pages</span>
-                    </div>
-                    <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/[0.06]">
-                      <span className="font-mono-code text-[10px] text-zinc-400 block">VECTORS</span>
-                      <span className="font-display text-xl font-bold text-amber-400">{totalChunks}</span>
-                      <span className="text-[10px] text-zinc-500 block">Cited Chunks</span>
-                    </div>
-                    <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/[0.06]">
-                      <span className="font-mono-code text-[10px] text-zinc-400 block">MODULES</span>
-                      <span className="font-display text-xl font-bold text-emerald-400">{totalModules}</span>
-                      <span className="text-[10px] text-zinc-500 block">Active Units</span>
-                    </div>
-                  </div>
-
-                  {/* Mini waveform / status bar */}
-                  <div className="p-3 rounded-2xl bg-zinc-950/90 border border-white/[0.06] flex items-center justify-between">
-                    <div className="flex items-center space-x-2.5">
-                      <div className="flex items-end space-x-0.5 h-4">
-                        {[0.4, 0.9, 0.6, 1, 0.5, 0.8, 0.3, 0.7].map((h, idx) => (
-                          <span
-                            key={idx}
-                            className="w-1 bg-amber-400 rounded-full animate-eq-bar"
-                            style={{
-                              height: `${h * 100}%`,
-                              animationDelay: `${idx * 0.12}s`,
-                            }}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-xs text-zinc-300 font-medium">
-                        {heroMode === "cinema"
-                          ? "Cinema Reel Stream Active"
-                          : "Interactive Harmonic Field — Move Cursor"}
-                      </span>
-                    </div>
-                    <span className="font-mono-code text-[10px] text-zinc-500">60 FPS</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* 3. Interactive Blueprint Walkthrough Mode */
-            <div className="relative z-10 my-auto py-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-              {tourSteps.map((st, idx) => {
-                const isSelected = activeTourStep === idx;
-                return (
-                  <div
-                    key={st.step}
-                    onClick={() => setActiveTourStep(idx)}
-                    className={`p-5 rounded-3xl backdrop-blur-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-5 ${
-                      isSelected
-                        ? "bg-black/85 border-amber-400/50 shadow-2xl scale-[1.01]"
-                        : "bg-black/55 border-white/[0.08] hover:border-white/[0.2]"
-                    }`}
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className={`font-mono-code text-xs px-2.5 py-0.5 rounded-md border ${st.accent}`}>
-                          STAGE {st.step}
-                        </span>
-                        <ArrowUpRight className="h-4 w-4 text-zinc-500" />
-                      </div>
-                      <h3 className="font-display text-base font-bold text-white">{st.title}</h3>
-                      <p className="text-xs text-zinc-300 leading-relaxed">{st.caption}</p>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onNavigate(st.tab);
-                      }}
-                      className="w-full py-2.5 px-3 rounded-xl bg-white/[0.08] hover:bg-amber-500 hover:text-black text-white text-xs font-bold transition-all flex items-center justify-center space-x-1.5"
-                    >
-                      <span>{st.actionLabel}</span>
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Bottom Cinema Controls & Scrubber Bar */}
-          <div className="relative z-10 pt-4 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center space-x-3">
               <button
                 onClick={togglePlay}
-                className="px-3 py-1.5 rounded-xl bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.1] text-xs font-semibold text-white flex items-center space-x-1.5 transition-colors"
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white"
+                title={isPlaying ? "Pause Video" : "Play Video"}
               >
-                {isPlaying ? <Pause className="h-3.5 w-3.5 text-amber-400" /> : <Play className="h-3.5 w-3.5 text-amber-400" />}
-                <span>{isPlaying ? "Pause Reel" : "Play Reel"}</span>
+                {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
               </button>
               <button
                 onClick={toggleMute}
-                className="p-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.08] text-zinc-300 hover:text-white transition-colors"
-                title={isMuted ? "Unmute Ambient Audio" : "Mute Audio"}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white"
+                title={isMuted ? "Unmute" : "Mute"}
               >
-                {isMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5 text-amber-400" />}
+                {isMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5 text-amber-300" />}
               </button>
-              <span className="font-mono-code text-[11px] text-zinc-400 hidden sm:inline">
-                HD 1080P // ZERO-HALLUCINATION CITATION ENGINE
+            </div>
+          </div>
+
+          {/* Center Hero Content + Floating Parallax Photo Cards */}
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center my-auto py-8">
+            {/* Left Simple & Clear Headline */}
+            <div className="lg:col-span-7 space-y-6">
+              <h1 className="font-display text-4xl sm:text-6xl lg:text-[64px] font-extrabold text-white tracking-tight leading-[1.04]">
+                Study Less.{" "}
+                <span className="font-editorial italic font-normal text-amber-300 block sm:inline">
+                  Score Higher.
+                </span>
+              </h1>
+
+              <p className="text-base sm:text-lg text-zinc-200 leading-relaxed max-w-xl font-normal">
+                Upload your textbook or notes. Get simple chapter summaries, quick 5-question quizzes, a daily exam plan, and live voice interview practice.
+              </p>
+
+              {/* Big Simple Action Buttons */}
+              <div className="pt-2 flex flex-wrap items-center gap-4">
+                <button
+                  onClick={() => onNavigate("documents")}
+                  className="group px-7 py-4 rounded-2xl bg-amber-400 hover:bg-amber-300 text-black font-extrabold text-sm shadow-[0_15px_35px_-8px_rgba(251,191,36,0.6)] flex items-center space-x-2.5 transition-all hover:scale-[1.02]"
+                >
+                  <Upload className="h-4 w-4" />
+                  <span>Upload PDF Notes</span>
+                  <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                </button>
+
+                <button
+                  onClick={onStartInterview}
+                  className="px-6 py-4 rounded-2xl bg-white/15 hover:bg-white/25 backdrop-blur-xl text-white font-bold text-sm border border-white/25 flex items-center space-x-2.5 transition-all hover:scale-[1.02]"
+                >
+                  <Mic className="h-4 w-4 text-rose-400" />
+                  <span>Practice Voice Interview</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Right Overlapping Floating Photo Collage */}
+            <div className="lg:col-span-5 hidden lg:block relative h-[340px]">
+              {/* Primary Photo Card */}
+              <div
+                className="absolute right-4 top-2 w-72 rounded-3xl overflow-hidden border-2 border-white/25 shadow-2xl animate-float"
+                style={{ transform: `translateY(${scrollY * -0.06}px)` }}
+              >
+                <img
+                  src="/media/photo-courses.jpg"
+                  alt="Study group and notes"
+                  className="w-full h-44 object-cover"
+                />
+                <div className="p-4 bg-black/80 backdrop-blur-xl space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                    Instant Course Builder
+                  </span>
+                  <p className="text-xs font-bold text-white">
+                    Chapter summaries, cheat sheets & 5-question quizzes
+                  </p>
+                </div>
+              </div>
+
+              {/* Secondary Overlapping Photo Card */}
+              <div
+                className="absolute left-0 bottom-0 w-64 rounded-3xl overflow-hidden border-2 border-white/25 shadow-2xl animate-float-delayed"
+                style={{ transform: `translateY(${scrollY * 0.05}px)` }}
+              >
+                <img
+                  src="/media/photo-interview.jpg"
+                  alt="Voice interview microphone"
+                  className="w-full h-36 object-cover"
+                />
+                <div className="p-3.5 bg-black/85 backdrop-blur-xl flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-rose-400 block">Voice Coach</span>
+                    <span className="text-xs font-bold text-white">Speak & Get Scored</span>
+                  </div>
+                  <span className="h-8 w-8 rounded-full bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-rose-300">
+                    <Mic className="h-4 w-4" />
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Scroll Prompt & Quick Stats */}
+          <div className="relative z-10 pt-4 border-t border-white/15 flex flex-wrap items-center justify-between gap-4 text-xs text-zinc-200">
+            <div className="flex flex-wrap items-center gap-6">
+              <span className="flex items-center space-x-2">
+                <CheckCircle2 className="h-4 w-4 text-amber-400" />
+                <span><strong>{documents.length}</strong> PDFs Uploaded</span>
+              </span>
+              <span className="flex items-center space-x-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                <span><strong>{courses.length}</strong> Study Courses</span>
+              </span>
+              <span className="flex items-center space-x-2">
+                <CheckCircle2 className="h-4 w-4 text-sky-400" />
+                <span><strong>{sprints.length}</strong> Exam Plans</span>
               </span>
             </div>
 
-            {/* Video Scrubber Progress */}
-            <div className="flex items-center space-x-3 w-full sm:w-64">
-              <span className="font-mono-code text-[10px] text-zinc-400">REEL</span>
-              <div className="flex-1 h-1.5 bg-white/[0.1] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-200"
-                  style={{ width: `${Math.max(8, videoProgress)}%` }}
-                />
-              </div>
-              <span className="font-mono-code text-[10px] text-amber-400">
-                {Math.round(videoProgress)}%
-              </span>
-            </div>
+            <a
+              href="#explore-features"
+              className="inline-flex items-center space-x-1.5 text-amber-300 hover:text-amber-200 font-semibold"
+            >
+              <span>Scroll down to explore</span>
+              <ChevronDown className="h-4 w-4 animate-bounce" />
+            </a>
           </div>
         </div>
       </section>
 
       {/* =====================================================================
-          ASYMMETRIC EDITORIAL BENTO GRID
+          2. INFINITE SCROLLING MARQUEE RIBBON
       ===================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left 8 Columns: Active Curriculums & Source Archive */}
-        <div className="lg:col-span-8 space-y-6">
-          {/* Curriculums Bento Panel */}
-          <div className="p-7 rounded-[26px] glass-panel space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/[0.06] pb-4">
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="font-mono-code text-[10px] uppercase tracking-widest text-amber-400">
-                    CHANNEL 03 // CURRICULUM LAB
-                  </span>
-                </div>
-                <h3 className="font-display text-xl font-bold text-white tracking-tight mt-0.5">
-                  Synthesized Study Curriculums
-                </h3>
-              </div>
-              <button
-                onClick={() => onNavigate("courses")}
-                className="px-3.5 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] text-xs font-semibold text-amber-300 flex items-center space-x-1.5 self-start sm:self-auto transition-all"
-              >
-                <span>Open Curriculum Lab</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
+      <div className="w-full overflow-hidden border-y border-white/10 bg-black/45 backdrop-blur-md py-4">
+        <div className="animate-marquee flex items-center space-x-10 text-sm font-display font-bold text-zinc-300">
+          {[
+            "✦ Upload Any Textbook PDF",
+            "✦ Simple Chapter Summaries",
+            "✦ 1-Page Formula Cheat Sheets",
+            "✦ 5-Question Chapter Quizzes",
+            "✦ Exact Page Number Proof",
+            "✦ Daily Exam Countdown Plan",
+            "✦ Past Question Paper Analyzer",
+            "✦ Live Voice Mock Interviews",
+            "✦ Upload Any Textbook PDF",
+            "✦ Simple Chapter Summaries",
+            "✦ 1-Page Formula Cheat Sheets",
+            "✦ 5-Question Chapter Quizzes",
+            "✦ Exact Page Number Proof",
+            "✦ Daily Exam Countdown Plan",
+            "✦ Past Question Paper Analyzer",
+            "✦ Live Voice Mock Interviews",
+          ].map((item, i) => (
+            <span key={i} className="whitespace-nowrap tracking-wide hover:text-amber-300 transition-colors">
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
 
-            {courses.length === 0 ? (
-              <div className="py-12 px-6 text-center rounded-2xl bg-[#07080c]/90 border border-dashed border-white/[0.1] space-y-4">
-                <div className="h-12 w-12 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center mx-auto text-amber-400">
-                  <BookOpen className="h-6 w-6" />
+      {/* =====================================================================
+          3. SCROLL-DRIVEN PHOTO & VIDEO FEATURE SHOWCASE
+      ===================================================================== */}
+      <section id="explore-features" className="max-w-7xl mx-auto px-4 sm:px-6 space-y-20">
+        <div className="text-center max-w-2xl mx-auto space-y-3 reveal-on-scroll">
+          <span className="px-3.5 py-1 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-300 text-xs font-bold uppercase tracking-wider">
+            Everything You Need in One Place
+          </span>
+          <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+            How LearnSync Helps You{" "}
+            <span className="font-editorial italic font-normal text-amber-300">
+              Win Every Exam
+            </span>
+          </h2>
+          <p className="text-sm sm:text-base text-zinc-300">
+            Four simple tools designed to save you hours of reading and help you walk into every test or interview with confidence.
+          </p>
+        </div>
+
+        <div className="space-y-16">
+          {featureStories.map((story, idx) => {
+            const isEven = idx % 2 === 1;
+            return (
+              <div
+                key={story.num}
+                className="reveal-on-scroll grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center p-6 sm:p-10 rounded-[36px] glass-panel glass-panel-hover"
+              >
+                {/* Photo Collage Side */}
+                <div className={`lg:col-span-6 relative ${isEven ? "lg:order-2" : ""}`}>
+                  <div className="relative rounded-3xl overflow-hidden border border-white/20 shadow-2xl group">
+                    <img
+                      src={story.image}
+                      alt={story.title}
+                      className="w-full h-[280px] sm:h-[340px] object-cover group-hover:scale-105 transition-transform duration-700"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+
+                    {/* Floating Badge on Photo */}
+                    <div className="absolute top-4 left-4 px-3.5 py-1.5 rounded-full bg-black/70 backdrop-blur-md border border-white/20 text-xs font-bold text-white flex items-center space-x-2">
+                      <span className={`h-2 w-2 rounded-full bg-gradient-to-r ${story.accent}`} />
+                      <span>{story.stat}</span>
+                    </div>
+
+                    {/* Secondary Inset Photo Thumbnail */}
+                    <div className="hidden sm:block absolute bottom-4 right-4 w-36 h-24 rounded-2xl overflow-hidden border-2 border-white/40 shadow-xl">
+                      <img
+                        src={story.secondaryImage}
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-1 max-w-md mx-auto">
-                  <h4 className="font-display text-base font-bold text-white">
-                    No curriculums synthesized yet
-                  </h4>
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    Upload a textbook PDF in the Source Archive or build a course from your existing documents in seconds.
+
+                {/* Simple Copy & CTA Side */}
+                <div className={`lg:col-span-6 space-y-5 ${isEven ? "lg:order-1" : ""}`}>
+                  <div className="inline-flex items-center space-x-2">
+                    <span className={`font-display text-sm font-black px-3 py-1 rounded-xl bg-gradient-to-r ${story.accent} text-black`}>
+                      {story.num}
+                    </span>
+                    <span className="text-xs font-bold tracking-widest uppercase text-amber-300">
+                      {story.tag}
+                    </span>
+                  </div>
+
+                  <h3 className="font-display text-2xl sm:text-4xl font-extrabold text-white leading-tight">
+                    {story.title}
+                  </h3>
+
+                  <p className="text-sm sm:text-base text-zinc-300 leading-relaxed">
+                    {story.desc}
                   </p>
+
+                  <div className="pt-2">
+                    <button
+                      onClick={() => onNavigate(story.tab)}
+                      className="group px-6 py-3.5 rounded-2xl bg-white text-black hover:bg-amber-300 font-extrabold text-xs sm:text-sm shadow-xl flex items-center space-x-2.5 transition-all"
+                    >
+                      <span>{story.buttonText}</span>
+                      <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => onNavigate(documents.length > 0 ? "courses" : "documents")}
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all shadow-lg shadow-amber-500/20"
-                >
-                  {documents.length > 0 ? "Build Course from Uploaded PDF" : "Upload First Textbook PDF"}
-                </button>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {courses.slice(0, 4).map((c, index) => (
-                  <div
-                    key={c.id}
-                    onClick={() => onSelectCourse(c.id)}
-                    className="p-5 rounded-2xl bg-[#080a10] border border-white/[0.07] hover:border-amber-500/40 cursor-pointer transition-all hover:-translate-y-1 group flex flex-col justify-between space-y-4"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono-code text-[10px] font-semibold px-2.5 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/25">
-                          VOL 0{index + 1} &bull; {c.modules?.length || 0} MODULES
-                        </span>
-                        <ArrowUpRight className="h-4 w-4 text-zinc-600 group-hover:text-amber-400 transition-colors" />
-                      </div>
-                      <h4 className="font-display text-base font-bold text-zinc-100 group-hover:text-white line-clamp-1">
+            );
+          })}
+        </div>
+      </section>
+
+      {/* =====================================================================
+          4. YOUR RECENT COURSES & STUDY PLANS (PHOTO-BACKED CARDS)
+      ===================================================================== */}
+      {(courses.length > 0 || sprints.length > 0) && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8 reveal-on-scroll">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                Jump Right Back In
+              </span>
+              <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
+                Your Active Study Space
+              </h2>
+            </div>
+            <button
+              onClick={() => onNavigate("courses")}
+              className="text-xs font-bold text-amber-300 hover:underline flex items-center space-x-1"
+            >
+              <span>See all courses</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {courses.slice(0, 3).map((c, i) => {
+              const cardPhotos = [
+                "/media/photo-courses.jpg",
+                "/media/photo-library.jpg",
+                "/media/photo-notes.jpg",
+              ];
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => onSelectCourse(c.id)}
+                  className="group rounded-3xl overflow-hidden glass-panel glass-panel-hover cursor-pointer flex flex-col justify-between"
+                >
+                  <div className="relative h-40 overflow-hidden">
+                    <img
+                      src={cardPhotos[i % cardPhotos.length]}
+                      alt={c.title}
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#0c0f18] via-black/30 to-transparent" />
+                    <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/70 backdrop-blur-md text-[11px] font-bold text-amber-300 border border-white/15">
+                      {c.modules?.length || 0} Chapters
+                    </span>
+                  </div>
+
+                  <div className="p-6 space-y-3 flex-1 flex flex-col justify-between">
+                    <div className="space-y-1.5">
+                      <h4 className="font-display text-lg font-bold text-white line-clamp-1 group-hover:text-amber-300 transition-colors">
                         {c.title}
                       </h4>
-                      <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
-                        {c.description || "Structured curriculum grounded in verified textbook pages."}
+                      <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed">
+                        {c.description || "Interactive chapters, cheat sheet, and 5-question quizzes."}
                       </p>
                     </div>
 
-                    <div className="pt-3 border-t border-white/[0.05] flex items-center justify-between text-[11px] text-zinc-500">
-                      <span>5-Question Quizzes + Cheat Deck</span>
-                      <span className="text-amber-400 font-semibold group-hover:underline">Enter Studio &rarr;</span>
+                    <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs font-bold text-amber-300">
+                      <span>Open Course</span>
+                      <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Empirical PYQ Sprint Banner */}
-          <div className="p-7 rounded-[26px] bg-gradient-to-r from-[#0d1218] via-[#0d1514] to-[#0a0d14] border border-emerald-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-            <div className="space-y-2 max-w-xl">
-              <div className="inline-flex items-center space-x-2 text-[10px] font-mono-code uppercase tracking-widest text-emerald-400">
-                <Flame className="h-3.5 w-3.5" />
-                <span>EMPIRICAL EXAM FREQUENCY ENGINE</span>
-              </div>
-              <h4 className="font-display text-lg font-bold text-white">
-                Align Past Question Papers with Your Textbook Syllabus
-              </h4>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Computes semantic cosine similarity between PYQ papers and textbook chapters to prioritize high-weight exam topics and build an adaptive daily schedule.
-              </p>
-            </div>
-            <button
-              onClick={() => onNavigate("sprints")}
-              className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all shrink-0 flex items-center space-x-2"
-            >
-              <CalendarDays className="h-4 w-4" />
-              <span>Launch Exam Roadmap</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Right 4 Columns: Exam Roadmap Snapshot & Broadcast Voice Booth */}
-        <div className="lg:col-span-4 space-y-6">
-          {/* Active Exam Sprint Card */}
-          <div className="p-6 rounded-[26px] glass-panel space-y-5">
-            <div className="flex items-center justify-between border-b border-white/[0.06] pb-3.5">
-              <div>
-                <span className="font-mono-code text-[10px] text-emerald-400 uppercase tracking-wider block">
-                  CHANNEL 04
-                </span>
-                <h3 className="font-display text-base font-bold text-white">
-                  Active Exam Roadmap
-                </h3>
-              </div>
-              {activeSprint && (
-                <button
-                  onClick={() => onSelectSprint(activeSprint.id)}
-                  className="text-xs text-amber-400 hover:underline font-semibold"
-                >
-                  Open Plan &rarr;
-                </button>
-              )}
-            </div>
-
-            {activeSprint ? (
-              <div className="space-y-4">
-                <div className="p-4 rounded-2xl bg-[#07080c] border border-white/[0.06] space-y-3">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-bold text-white truncate">{activeSprint.title}</span>
-                    <span className="font-mono-code px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold">
-                      {activeSprint.daily_study_hours}H / DAY
-                    </span>
-                  </div>
-                  <div className="w-full bg-zinc-900 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-amber-400 to-emerald-400 h-full rounded-full transition-all duration-500"
-                      style={{ width: `${sprintProgress}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-[11px] text-zinc-400 font-mono-code">
-                    <span>{activeSprint.progress_percentage}% COMPLETE</span>
-                    <span>EXAM: {new Date(activeSprint.exam_date).toLocaleDateString()}</span>
-                  </div>
                 </div>
-
-                <div className="space-y-2">
-                  <span className="font-mono-code text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
-                    Next Scheduled Blocks
-                  </span>
-                  <div className="space-y-2">
-                    {activeSprint.tasks.slice(0, 3).map((tk) => (
-                      <div
-                        key={tk.id}
-                        onClick={() => onSelectSprint(activeSprint.id)}
-                        className="p-3 rounded-xl bg-[#080a10] border border-white/[0.06] hover:border-white/[0.15] cursor-pointer flex items-center justify-between text-xs transition-colors"
-                      >
-                        <div className="flex items-center space-x-2.5 truncate">
-                          <span
-                            className={`h-2 w-2 rounded-full shrink-0 ${
-                              tk.is_completed ? "bg-emerald-400" : "bg-amber-400"
-                            }`}
-                          />
-                          <span
-                            className={`truncate ${
-                              tk.is_completed ? "line-through text-zinc-500" : "text-zinc-200 font-medium"
-                            }`}
-                          >
-                            {tk.title}
-                          </span>
-                        </div>
-                        <span className="font-mono-code text-[10px] text-zinc-500 shrink-0 ml-2">
-                          {tk.estimated_minutes}m
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="py-8 text-center space-y-3 text-xs text-zinc-400">
-                <CalendarDays className="h-7 w-7 text-zinc-600 mx-auto" />
-                <p>No active exam sprint configured.</p>
-                <button
-                  onClick={() => onNavigate("sprints")}
-                  className="px-4 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-white font-semibold border border-white/[0.08]"
-                >
-                  Create Exam Schedule
-                </button>
-              </div>
-            )}
+              );
+            })}
           </div>
-
-          {/* Voice Broadcast Booth Card */}
-          <div className="p-6 rounded-[26px] bg-gradient-to-b from-[#140c14] to-[#0a0c12] border border-rose-500/25 space-y-4 relative overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" />
-                <span className="font-mono-code text-[10px] uppercase tracking-widest text-rose-400 font-semibold">
-                  ON AIR // VOICE BOOTH
-                </span>
-              </div>
-              {lastInterview?.report && (
-                <span className="font-mono-code text-xs font-bold text-emerald-400">
-                  LAST: {lastInterview.report.overall_score}%
-                </span>
-              )}
-            </div>
-
-            <h3 className="font-display text-lg font-bold text-white">
-              Adaptive Mock Mentor Studio
-            </h3>
-
-            <p className="text-xs text-zinc-300/90 leading-relaxed">
-              Rehearse technical, system design, and behavioral rounds tailored to your resume PDF. Real-time speech-to-text dictation & multi-dimensional 1–5 grading.
-            </p>
-
-            <button
-              onClick={onStartInterview}
-              className="w-full py-3 rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-black text-xs font-extrabold tracking-wide shadow-lg shadow-rose-500/20 transition-all flex items-center justify-center space-x-2"
-            >
-              <Mic className="h-4 w-4" />
-              <span>Start Voice Interview Session</span>
-            </button>
-          </div>
-        </div>
-      </div>
+        </section>
+      )}
     </div>
   );
 };
