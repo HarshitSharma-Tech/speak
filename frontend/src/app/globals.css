@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+:root {
+  --background: #06070a;
+  --foreground: #f4f4f6;
+  --card: #0c0e14;
+  --card-border: rgba(255, 255, 255, 0.08);
+  --accent-amber: #f59e0b;
+  --accent-emerald: #10b981;
+  --accent-coral: #f43f5e;
+}
+
+body {
+  background-color: #06070a;
+  color: #f4f4f6;
+  font-family: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: var(--font-syne), sans-serif;
+}
+
+.font-editorial {
+  font-family: var(--font-serif), Georgia, serif;
+}
+
+.font-mono-code {
+  font-family: var(--font-mono), monospace;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #06070a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #222634;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #f59e0b;
+}
+
+/* Studio Bento Surface */
+.glass-panel {
+  background: linear-gradient(165deg, rgba(18, 21, 30, 0.88) 0%, rgba(10, 12, 18, 0.94) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.glass-panel-hover {
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-panel-hover:hover {
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 24px 48px -12px rgba(245, 158, 11, 0.12), inset 0 1px 0 0 rgba(245, 158, 11, 0.2);
+  transform: translateY(-3px);
+}
+
+/* Subtle architectural grid background */
+.studio-grid-bg {
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Pulse animation for voice recording */
+@keyframes mic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.65);
+  }
+  70% {
+    box-shadow: 0 0 0 18px rgba(244, 63, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+  }
+}
+
+.mic-recording {
+  animation: mic-pulse 1.6s infinite;
+}
+
+/* Audio Equalizer Bars for Broadcast Booth */
+@keyframes eq-bar {
+  0%, 100% {
+    transform: scaleY(0.2);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.animate-eq-bar {
+  animation: eq-bar 0.9s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+/* Shimmer effect */
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer-sweep 2.5s infinite;
+}
