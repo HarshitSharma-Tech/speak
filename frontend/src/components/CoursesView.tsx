@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   GraduationCap,
   BookOpen,
@@ -8,42 +10,586 @@ import {
   Trash2,
   ArrowRight,
   Plus,
-  ArrowLeft,
   ChevronRight,
-  FileText
+  FileText,
+  Upload,
 } from "lucide-react";
-import { CourseItem, DocumentItem, QuizItem, api } from "@/lib/api";
+import { CourseItem, QuizItem, api } from "@/lib/api";
+import { useWorkspace } from "@/context/WorkspaceContext";
 import { QuizRunner } from "./QuizRunner";
 import { CheatSheetView } from "./CheatSheetView";
+import {
+  PageHeader,
+  Card,
+  Button,
+  Badge,
+  Dialog,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  InlineBanner,
+  FormField,
+  Input,
+  Select,
+  Skeleton,
+} from "@/components/ui";
 
-interface CoursesViewProps {
-  courses: CourseItem[];
-  documents: DocumentItem[];
-  onRefresh: () => void;
-  onOpenCitation: (chunkId: string) => void;
-  selectedCourseId?: string | null;
+/**
+ * Renders inline markdown bold (**bold**) and inline code (`code`)
+ */
+function renderInlineText(text: string): React.ReactNode {
+  if (!text) return null;
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={i} className="font-semibold text-[#17212B]">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code
+          key={i}
+          className="font-mono-code text-xs px-1.5 py-0.5 rounded bg-[#F1F4F9] text-[#1D4ED8] border border-[#E2E7ED]"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return part;
+  });
 }
 
-const COURSE_PHOTOS = [
-  "/media/photo-courses.jpg",
-  "/media/photo-library.jpg",
-  "/media/photo-notes.jpg",
-  "/media/photo-hero-desk.jpg",
-];
+/**
+ * Formats module learning_content into readable paragraphs, headings, lists, and formula/code blocks
+ * within a constrained reading width (max-w-[68ch]).
+ */
+function FormattedLearningContent({ content }: { content: string }) {
+  if (!content) return null;
+  const blocks = content.split(/\n{2,}/);
 
-export const CoursesView: React.FC<CoursesViewProps> = ({
-  courses,
-  documents,
-  onRefresh,
-  onOpenCitation,
-  selectedCourseId: initialSelectedCourseId,
+  return (
+    <div className="reading-prose space-y-4">
+      {blocks.map((rawBlock, idx) => {
+        const block = rawBlock.trim();
+        if (!block) return null;
+
+        // Heading detection
+        if (block.startsWith("### ")) {
+          return (
+            <h4 key={idx} className="text-base font-bold text-[#17212B] pt-2">
+              {block.replace(/^###\s+/, "")}
+            </h4>
+          );
+        }
+        if (block.startsWith("## ") || block.startsWith("# ")) {
+          return (
+            <h3 key={idx} className="text-lg font-bold text-[#17212B] pt-3">
+              {block.replace(/^#{1,2}\s+/, "")}
+            </h3>
+          );
+        }
+        if (
+          /^\*\*[^*]+:?\*\*$/.test(block) &&
+          !block.includes("\n") &&
+          block.length < 90
+        ) {
+          return (
+            <h4 key={idx} className="text-base font-bold text-[#17212B] pt-2">
+              {block.replace(/^\*\*/, "").replace(/\*\*$/, "")}
+            </h4>
+          );
+        }
+
+        // Code block detection
+        if (block.startsWith("```") && block.endsWith("```")) {
+          const code = block.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "");
+          return (
+            <pre
+              key={idx}
+              className="p-4 rounded-xl bg-[#F7F8FA] border border-[#E2E7ED] font-mono-code text-xs text-[#17212B] overflow-x-auto leading-relaxed"
+            >
+              <code>{code}</code>
+            </pre>
+          );
+        }
+
+        // Bullet or numbered list detection
+        const lines = block.split("\n").map((l) => l.trim());
+        const isBulletList =
+          lines.length > 1 &&
+          lines.every((l) => /^[-*•]\s+/.test(l));
+        if (isBulletList) {
+          return (
+            <ul key={idx} className="list-disc pl-5 space-y-1.5 text-[#17212B]">
+              {lines.map((l, i) => (
+                <li key={i} className="leading-relaxed">
+                  {renderInlineText(l.replace(/^[-*•]\s+/, ""))}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        const isNumberedList =
+          lines.length > 1 &&
+          lines.every((l) => /^\d+[.)]\s+/.test(l));
+        if (isNumberedList) {
+          return (
+            <ol key={idx} className="list-decimal pl-5 space-y-1.5 text-[#17212B]">
+              {lines.map((l, i) => (
+                <li key={i} className="leading-relaxed">
+                  {renderInlineText(l.replace(/^\d+[.)]\s+/, ""))}
+                </li>
+              ))}
+            </ol>
+          );
+        }
+
+        // Formula-like single line
+        if (
+          lines.length === 1 &&
+          block.includes("=") &&
+          block.length < 120 &&
+          /[+\-*/^()]/.test(block)
+        ) {
+          return (
+            <div
+              key={idx}
+              className="p-3.5 rounded-lg bg-[#FFFBEB]/60 border border-[#FDE68A] font-mono-code text-sm text-[#17212B]"
+            >
+              {block}
+            </div>
+          );
+        }
+
+        return (
+          <p key={idx} className="text-[#17212B] leading-[1.75] whitespace-pre-line">
+            {renderInlineText(block)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============================================================================
+   COURSE DETAIL VIEW (/app/courses/[courseId])
+============================================================================ */
+
+export const CourseDetailView: React.FC<{ courseId: string }> = ({
+  courseId,
 }) => {
-  const [activeCourseId, setActiveCourseId] = useState<string | null>(initialSelectedCourseId || null);
-  const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialModuleParam = searchParams.get("module");
 
-  const [subView, setSubView] = useState<"module" | "quiz" | "cheat_sheet">("module");
+  const {
+    courses,
+    loading: workspaceLoading,
+    refreshCourses,
+    notify,
+    openCitation,
+  } = useWorkspace();
+
+  const [fetchedCourse, setFetchedCourse] = useState<CourseItem | null>(null);
+  const [checkedCourseId, setCheckedCourseId] = useState<string | null>(null);
+
+  const inContextCourse = courses.find((c) => c.id === courseId) || null;
+  const course =
+    inContextCourse ||
+    (fetchedCourse?.id === courseId ? fetchedCourse : null);
+
+  const [selectedModuleId, setSelectedModuleId] = useState<string | null>(
+    initialModuleParam
+  );
+  const [subView, setSubView] = useState<"module" | "quiz" | "cheat_sheet">(
+    "module"
+  );
   const [activeQuiz, setActiveQuiz] = useState<QuizItem | null>(null);
   const [loadingQuiz, setLoadingQuiz] = useState(false);
+  const [quizError, setQuizError] = useState<string | null>(null);
+
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (inContextCourse || workspaceLoading) return;
+    let cancelled = false;
+    api
+      .getCourse(courseId)
+      .then((data) => {
+        if (cancelled) return;
+        setFetchedCourse(data);
+        setCheckedCourseId(courseId);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFetchedCourse(null);
+        setCheckedCourseId(courseId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, inContextCourse, workspaceLoading]);
+
+  const fetchingDetail =
+    !inContextCourse && !workspaceLoading && checkedCourseId !== courseId;
+  const notFound =
+    !inContextCourse &&
+    !workspaceLoading &&
+    checkedCourseId === courseId &&
+    !course;
+
+  const currentModule =
+    course?.modules.find((m) => m.id === selectedModuleId) ||
+    course?.modules[0] ||
+    null;
+
+  const handleStartQuiz = async (moduleId: string) => {
+    setLoadingQuiz(true);
+    setQuizError(null);
+    try {
+      const quiz = await api.generateQuiz(moduleId);
+      setActiveQuiz(quiz);
+      setSubView("quiz");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err: unknown) {
+      setQuizError(
+        err instanceof Error ? err.message : "Could not generate quiz."
+      );
+    } finally {
+      setLoadingQuiz(false);
+    }
+  };
+
+  const handleDeleteCourse = async () => {
+    if (!course) return;
+    setDeleting(true);
+    try {
+      await api.deleteCourse(course.id);
+      await refreshCourses();
+      notify("success", `Deleted course "${course.title}".`);
+      router.push("/app/courses");
+    } catch (err: unknown) {
+      notify(
+        "error",
+        err instanceof Error ? err.message : "Could not delete course."
+      );
+      setDeleting(false);
+    }
+  };
+
+  if (workspaceLoading || fetchingDetail) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <Skeleton className="lg:col-span-4 h-72" />
+          <Skeleton className="lg:col-span-8 h-96" />
+        </div>
+      </div>
+    );
+  }
+
+  if (notFound || !course) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Course not found"
+          breadcrumbs={[
+            { label: "Courses", href: "/app/courses" },
+            { label: "Not found" },
+          ]}
+        />
+        <EmptyState
+          icon={<BookOpen className="h-6 w-6" />}
+          title="This course is unavailable or was deleted"
+          description="The course ID in the link could not be found. Return to the courses catalog to open an existing course or generate a new one."
+          action={
+            <Link
+              href="/app/courses"
+              className="inline-flex items-center justify-center h-10 px-4 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-sm font-medium"
+            >
+              Back to Courses
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title={course.title}
+        description={course.description}
+        breadcrumbs={[
+          { label: "Courses", href: "/app/courses" },
+          { label: course.title },
+        ]}
+        badge={<Badge variant="brand">{course.modules.length} modules</Badge>}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {course.cheat_sheets[0] && (
+              <Button
+                variant={subView === "cheat_sheet" ? "primary" : "outline"}
+                size="sm"
+                onClick={() =>
+                  setSubView(
+                    subView === "cheat_sheet" ? "module" : "cheat_sheet"
+                  )
+                }
+                icon={<FileText className="h-4 w-4" />}
+              >
+                {subView === "cheat_sheet"
+                  ? "View module notes"
+                  : "Revision cheat sheet"}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmDeleteOpen(true)}
+              icon={<Trash2 className="h-4 w-4 text-[#B91C1C]" />}
+              title="Delete course"
+            >
+              Delete
+            </Button>
+          </div>
+        }
+      />
+
+      {quizError && (
+        <InlineBanner
+          variant="error"
+          title="Could not generate quiz"
+          onDismiss={() => setQuizError(null)}
+        >
+          {quizError}
+        </InlineBanner>
+      )}
+
+      {subView === "quiz" && activeQuiz ? (
+        <QuizRunner
+          quiz={activeQuiz}
+          courseId={course.id}
+          onOpenSourceCitation={(chunkId) => openCitation(chunkId, course.id)}
+          onRetake={() => handleStartQuiz(activeQuiz.module_id)}
+          onClose={() => setSubView("module")}
+        />
+      ) : subView === "cheat_sheet" && course.cheat_sheets[0] ? (
+        <CheatSheetView
+          cheatSheet={course.cheat_sheets[0]}
+          courseTitle={course.title}
+          onOpenCitation={(chunkId) => openCitation(chunkId, course.id)}
+          onBack={() => setSubView("module")}
+        />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Module Navigator (4 cols) */}
+          <nav
+            aria-label="Course modules"
+            className="lg:col-span-4 space-y-3 lg:sticky lg:top-20"
+          >
+            <Card className="p-4 space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-[#526170]">
+                  Modules ({course.modules.length})
+                </h2>
+              </div>
+
+              <div className="space-y-1.5">
+                {course.modules.map((mod) => {
+                  const isSelected = currentModule?.id === mod.id;
+                  return (
+                    <button
+                      key={mod.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedModuleId(mod.id);
+                        setSubView("module");
+                      }}
+                      className={`w-full text-left p-3 rounded-lg border transition-colors flex items-center justify-between gap-2 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+                        isSelected
+                          ? "bg-[#EFF6FF] border-[#1D4ED8] text-[#17212B]"
+                          : "bg-white border-[#E2E7ED] hover:bg-[#F7F8FA] text-[#526170]"
+                      }`}
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <span
+                          className={`text-[11px] font-mono-code font-semibold block ${
+                            isSelected ? "text-[#1D4ED8]" : "text-[#64748B]"
+                          }`}
+                        >
+                          Module {mod.module_order}
+                        </span>
+                        <span className="text-xs font-semibold text-[#17212B] truncate block">
+                          {mod.title}
+                        </span>
+                      </div>
+                      <ChevronRight
+                        className={`h-4 w-4 shrink-0 ${
+                          isSelected ? "text-[#1D4ED8]" : "text-[#64748B]"
+                        }`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {course.cheat_sheets[0] && (
+                <div className="pt-3 border-t border-[#E2E7ED]">
+                  <button
+                    type="button"
+                    onClick={() => setSubView("cheat_sheet")}
+                    className="w-full p-3 rounded-lg bg-[#FFFBEB] hover:bg-[#FEF3C7] border border-[#FDE68A] text-left flex items-center justify-between gap-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <FileText className="h-4 w-4 text-[#B45309] shrink-0" />
+                      <div>
+                        <span className="text-xs font-bold text-[#17212B] block">
+                          1-Page Cheat Sheet
+                        </span>
+                        <span className="text-[11px] text-[#B45309]">
+                          Definitions, formulas & key points
+                        </span>
+                      </div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-[#B45309] shrink-0" />
+                  </button>
+                </div>
+              )}
+            </Card>
+          </nav>
+
+          {/* Right Reading Area (8 cols) */}
+          <div className="lg:col-span-8">
+            {currentModule ? (
+              <Card className="p-6 sm:p-8 space-y-6">
+                {/* Module Header & Quiz Trigger */}
+                <div className="pb-5 border-b border-[#E2E7ED] flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <Badge variant="brand">
+                      Module {currentModule.module_order} of{" "}
+                      {course.modules.length}
+                    </Badge>
+                    <h2 className="text-2xl font-bold text-[#17212B] tracking-tight pt-1">
+                      {currentModule.title}
+                    </h2>
+                    {currentModule.summary && (
+                      <p className="text-sm text-[#526170] leading-relaxed">
+                        {currentModule.summary}
+                      </p>
+                    )}
+                  </div>
+
+                  <Button
+                    variant="primary"
+                    onClick={() => handleStartQuiz(currentModule.id)}
+                    loading={loadingQuiz}
+                    icon={<HelpCircle className="h-4 w-4" />}
+                  >
+                    {loadingQuiz ? "Preparing quiz..." : "Take 5-question quiz"}
+                  </Button>
+                </div>
+
+                {/* Key Topics Chips */}
+                {currentModule.key_topics?.length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-semibold text-[#526170] block">
+                      Key topics covered
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {currentModule.key_topics.map((topic, idx) => (
+                        <Badge key={idx} variant="default">
+                          {topic}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Constrained Long-form Reading Content */}
+                <div className="pt-2">
+                  <FormattedLearningContent
+                    content={currentModule.learning_content}
+                  />
+                </div>
+
+                {/* Grounded Source Citations Footer */}
+                <div className="pt-6 border-t border-[#E2E7ED] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-[#17212B]">
+                      <BookOpen className="h-4 w-4 text-[#1D4ED8]" />
+                      <span>Textbook source references</span>
+                    </div>
+                    <p className="text-xs text-[#526170]">
+                      Inspect the exact page and passage from your uploaded PDF.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {currentModule.source_chunk_ids?.length > 0 ? (
+                      currentModule.source_chunk_ids
+                        .slice(0, 4)
+                        .map((chunkId, idx) => (
+                          <Button
+                            key={chunkId}
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openCitation(chunkId, course.id)}
+                            icon={<BookOpen className="h-3.5 w-3.5 text-[#1D4ED8]" />}
+                          >
+                            Source passage #{idx + 1}
+                          </Button>
+                        ))
+                    ) : (
+                      <span className="text-xs text-[#64748B]">
+                        Derived from uploaded document
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onClose={() => !deleting && setConfirmDeleteOpen(false)}
+        onConfirm={handleDeleteCourse}
+        title="Delete course?"
+        description={`Are you sure you want to delete "${course.title}"? This removes its modules, cheat sheet, and generated quizzes. Your original uploaded PDF document will remain in Documents.`}
+        confirmLabel="Delete course"
+        variant="danger"
+        loading={deleting}
+      />
+    </div>
+  );
+};
+
+/* ============================================================================
+   COURSES CATALOG VIEW (/app/courses)
+============================================================================ */
+
+export const CoursesView: React.FC<{ selectedCourseId?: string | null }> = ({
+  selectedCourseId,
+}) => {
+  const router = useRouter();
+  const {
+    courses,
+    documents,
+    loading,
+    errors,
+    refreshCourses,
+    refreshAll,
+    notify,
+  } = useWorkspace();
 
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string>("");
@@ -52,22 +598,34 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  const activeCourse = courses.find((c) => c.id === activeCourseId) || null;
-  const currentModule =
-    activeCourse?.modules.find((m) => m.id === selectedModuleId) || activeCourse?.modules[0] || null;
+  const [courseToDelete, setCourseToDelete] = useState<CourseItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  if (selectedCourseId) {
+    return <CourseDetailView courseId={selectedCourseId} />;
+  }
 
   const handleLaunchGenerateModal = () => {
-    const textbook = documents.find((d) => d.file_type === "textbook") || documents[0];
-    if (textbook) {
-      setSelectedDocId(textbook.id);
-      setCourseTitleInput(textbook.original_name.replace(".pdf", "").replace(/_/g, " "));
+    const defaultDoc =
+      documents.find((d) => d.file_type === "textbook") || documents[0];
+    if (defaultDoc) {
+      setSelectedDocId(defaultDoc.id);
+      setCourseTitleInput(
+        defaultDoc.original_name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ")
+      );
+    } else {
+      setSelectedDocId("");
+      setCourseTitleInput("");
     }
+    setModuleCountInput(4);
+    setGenerationError(null);
     setShowGenerateModal(true);
   };
 
-  const handleCreateCourse = async () => {
+  const handleCreateCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!selectedDocId) {
-      setGenerationError("Please choose an uploaded PDF first.");
+      setGenerationError("Please select an uploaded PDF document first.");
       return;
     }
 
@@ -75,432 +633,309 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     setGenerationError(null);
 
     try {
-      const newCourse = await api.generateCourse(selectedDocId, courseTitleInput, moduleCountInput);
-      onRefresh();
+      const newCourse = await api.generateCourse(
+        selectedDocId,
+        courseTitleInput.trim() || undefined,
+        moduleCountInput
+      );
+      await refreshAll();
       setShowGenerateModal(false);
-      setActiveCourseId(newCourse.id);
-      setSelectedModuleId(newCourse.modules[0]?.id || null);
-      setSubView("module");
-    } catch (err: any) {
-      setGenerationError(err.message || "Could not create course.");
+      notify("success", `Course "${newCourse.title}" is ready.`);
+      router.push(`/app/courses/${newCourse.id}`);
+    } catch (err: unknown) {
+      setGenerationError(
+        err instanceof Error ? err.message : "Could not generate course."
+      );
     } finally {
       setGenerating(false);
     }
   };
 
-  const handleDeleteCourse = async (courseId: string, title: string) => {
-    if (!confirm(`Delete course "${title}"?`)) return;
+  const handleConfirmDelete = async () => {
+    if (!courseToDelete) return;
+    setDeleting(true);
     try {
-      await api.deleteCourse(courseId);
-      if (activeCourseId === courseId) {
-        setActiveCourseId(null);
-        setSelectedModuleId(null);
-      }
-      onRefresh();
-    } catch (err: any) {
-      alert("Could not delete course: " + err.message);
-    }
-  };
-
-  const handleStartQuiz = async (moduleId: string) => {
-    setLoadingQuiz(true);
-    try {
-      const quiz = await api.generateQuiz(moduleId);
-      setActiveQuiz(quiz);
-      setSubView("quiz");
-    } catch (err: any) {
-      alert("Could not start quiz: " + err.message);
+      await api.deleteCourse(courseToDelete.id);
+      await refreshCourses();
+      notify("success", `Deleted course "${courseToDelete.title}".`);
+      setCourseToDelete(null);
+    } catch (err: unknown) {
+      notify(
+        "error",
+        err instanceof Error ? err.message : "Could not delete course."
+      );
     } finally {
-      setLoadingQuiz(false);
+      setDeleting(false);
     }
   };
 
-  if (activeCourse && subView === "quiz" && activeQuiz) {
-    return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6">
-        <QuizRunner
-          quiz={activeQuiz}
-          courseId={activeCourse.id}
-          onOpenSourceCitation={onOpenCitation}
-          onRetake={() => handleStartQuiz(activeQuiz.module_id)}
-          onClose={() => setSubView("module")}
-        />
-      </div>
-    );
-  }
-
-  if (activeCourse && subView === "cheat_sheet" && activeCourse.cheat_sheets[0]) {
-    return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6">
-        <CheatSheetView
-          cheatSheet={activeCourse.cheat_sheets[0]}
-          courseTitle={activeCourse.title}
-          onOpenCitation={onOpenCitation}
-          onBack={() => setSubView("module")}
-        />
-      </div>
-    );
-  }
-
-  // Course Reader View
-  if (activeCourse) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <button
-            onClick={() => setActiveCourseId(null)}
-            className="inline-flex items-center space-x-2 text-xs font-bold text-zinc-300 hover:text-white transition-colors"
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title="Courses"
+        description="Structured study courses generated from your uploaded textbooks and notes, complete with module summaries, cheat sheets, and cited quizzes."
+        actions={
+          <Button
+            variant="primary"
+            onClick={handleLaunchGenerateModal}
+            icon={<Plus className="h-4 w-4" />}
           >
-            <ArrowLeft className="h-4 w-4" />
-            <span>Back to All Courses</span>
-          </button>
+            Create course
+          </Button>
+        }
+      />
 
-          <div className="flex items-center space-x-3">
-            {activeCourse.cheat_sheets[0] && (
-              <button
-                onClick={() => setSubView("cheat_sheet")}
-                className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold flex items-center space-x-2 shadow-lg shadow-amber-400/20 transition-all"
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Skeleton className="h-48" />
+          <Skeleton className="h-48" />
+        </div>
+      ) : errors.courses ? (
+        <ErrorState
+          title="Could not load courses"
+          message={errors.courses}
+          onRetry={refreshCourses}
+        />
+      ) : courses.length === 0 ? (
+        <EmptyState
+          icon={<GraduationCap className="h-6 w-6" />}
+          title="No courses created yet"
+          description={
+            documents.length > 0
+              ? "Select one of your uploaded PDF documents to generate structured modules, a 1-page formula cheat sheet, and 5-question quizzes."
+              : "Upload a textbook or study notes PDF first, then generate a structured course from it."
+          }
+          action={
+            documents.length > 0 ? (
+              <Button
+                variant="primary"
+                onClick={handleLaunchGenerateModal}
+                icon={<Plus className="h-4 w-4" />}
               >
-                <FileText className="h-4 w-4" />
-                <span>Open 1-Page Cheat Sheet</span>
-              </button>
-            )}
-            <button
-              onClick={() => handleDeleteCourse(activeCourse.id, activeCourse.title)}
-              className="p-2.5 rounded-xl bg-white/10 text-zinc-300 hover:text-rose-400 transition-colors"
-              title="Delete Course"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Course Photo Banner */}
-        <div className="relative rounded-[32px] overflow-hidden border border-white/15 p-8 sm:p-10 shadow-2xl">
-          <img
-            src="/media/photo-courses.jpg"
-            alt={activeCourse.title}
-            className="absolute inset-0 w-full h-full object-cover filter brightness-[0.35]"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/60 to-transparent" />
-          <div className="relative z-10 space-y-2 max-w-3xl">
-            <span className="px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-bold border border-amber-400/30">
-              {activeCourse.modules.length} Chapters
-            </span>
-            <h2 className="font-display text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-              {activeCourse.title}
-            </h2>
-            {activeCourse.description && (
-              <p className="text-sm text-zinc-200 leading-relaxed">{activeCourse.description}</p>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Chapters Sidebar */}
-          <div className="lg:col-span-1 space-y-2">
-            <span className="text-xs font-bold text-zinc-300 block px-1">Chapters</span>
-            <div className="space-y-2">
-              {activeCourse.modules.map((mod) => {
-                const isSelected = currentModule?.id === mod.id;
-                return (
-                  <button
-                    key={mod.id}
-                    onClick={() => {
-                      setSelectedModuleId(mod.id);
-                      setSubView("module");
-                    }}
-                    className={`w-full text-left p-4 rounded-2xl border transition-all flex items-center justify-between group ${
-                      isSelected
-                        ? "bg-amber-400 text-black border-amber-300 shadow-lg shadow-amber-400/20"
-                        : "glass-panel text-zinc-200 hover:border-white/30"
-                    }`}
-                  >
-                    <div className="truncate space-y-0.5">
-                      <span
-                        className={`text-[10px] font-bold uppercase block ${
-                          isSelected ? "text-black/70" : "text-amber-300"
-                        }`}
-                      >
-                        Chapter {mod.module_order}
-                      </span>
-                      <h4 className="text-xs font-bold truncate">{mod.title}</h4>
+                Create your first course
+              </Button>
+            ) : (
+              <Link
+                href="/app/documents"
+                className="inline-flex items-center justify-center h-10 px-4 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-sm font-medium gap-2"
+              >
+                <Upload className="h-4 w-4" />
+                <span>Upload a PDF document</span>
+              </Link>
+            )
+          }
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {courses.map((c) => {
+            const sourceDoc = documents.find((d) => d.id === c.document_id);
+            return (
+              <Card
+                key={c.id}
+                className="p-6 flex flex-col justify-between gap-5 hover:border-[#CBD5E1] transition-colors"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="brand">
+                        {c.modules?.length || 0} modules
+                      </Badge>
+                      {c.cheat_sheets?.length > 0 && (
+                        <Badge variant="amber">Cheat sheet included</Badge>
+                      )}
                     </div>
-                    <ChevronRight className="h-4 w-4 shrink-0" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Chapter Content */}
-          <div className="lg:col-span-3">
-            {currentModule ? (
-              <div className="p-6 sm:p-8 rounded-[32px] glass-panel space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-5 border-b border-white/10">
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-bold text-amber-300">
-                      Chapter {currentModule.module_order}
-                    </span>
-                    <h3 className="font-display text-2xl font-extrabold text-white">
-                      {currentModule.title}
-                    </h3>
-                    {currentModule.summary && (
-                      <p className="text-sm text-zinc-300">{currentModule.summary}</p>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={() => handleStartQuiz(currentModule.id)}
-                    disabled={loadingQuiz}
-                    className="px-5 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-black text-xs font-extrabold shadow-lg shadow-amber-400/25 flex items-center space-x-2 shrink-0 transition-all"
-                  >
-                    {loadingQuiz ? (
-                      <>
-                        <span className="h-3.5 w-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                        <span>Making Quiz...</span>
-                      </>
-                    ) : (
-                      <>
-                        <HelpCircle className="h-4 w-4" />
-                        <span>Take 5-Question Quiz</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {currentModule.key_topics?.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {currentModule.key_topics.map((t, idx) => (
-                      <span
-                        key={idx}
-                        className="px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-semibold text-amber-200"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="p-6 rounded-2xl bg-black/55 border border-white/10 text-zinc-100 text-sm sm:text-base leading-relaxed whitespace-pre-wrap">
-                  {currentModule.learning_content}
-                </div>
-
-                <div className="p-4 rounded-2xl bg-white/5 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center space-x-2 text-zinc-200">
-                    <BookOpen className="h-4 w-4 text-amber-400 shrink-0" />
-                    <span>Verified from your uploaded PDF</span>
-                  </div>
-                  {currentModule.source_chunk_ids?.[0] && (
                     <button
-                      onClick={() => onOpenCitation(currentModule.source_chunk_ids[0])}
-                      className="text-xs font-bold text-amber-300 hover:underline"
+                      type="button"
+                      onClick={() => setCourseToDelete(c)}
+                      aria-label={`Delete course ${c.title}`}
+                      title="Delete course"
+                      className="p-1.5 rounded-lg text-[#64748B] hover:text-[#B91C1C] hover:bg-[#FEF2F2] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
                     >
-                      See Exact Page in PDF &rarr;
+                      <Trash2 className="h-4 w-4" />
                     </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h2 className="text-lg font-bold text-[#17212B]">
+                      <Link
+                        href={`/app/courses/${c.id}`}
+                        className="hover:text-[#1D4ED8] transition-colors focus-visible:outline-none focus-visible:underline"
+                      >
+                        {c.title}
+                      </Link>
+                    </h2>
+                    <p className="text-xs text-[#526170] line-clamp-2 leading-relaxed">
+                      {c.description ||
+                        "Structured study modules, revision cheat sheet, and cited 5-question quizzes."}
+                    </p>
+                  </div>
+
+                  {sourceDoc && (
+                    <div className="text-xs text-[#64748B] flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">
+                        Source: {sourceDoc.original_name}
+                      </span>
+                    </div>
                   )}
                 </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  // Courses Catalog
-  return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-10">
-      {/* Photo Hero Banner */}
-      <div className="relative rounded-[32px] overflow-hidden border border-white/15 shadow-2xl p-8 sm:p-12 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-        <img
-          src="/media/photo-courses.jpg"
-          alt="Students studying"
-          className="absolute inset-0 w-full h-full object-cover filter brightness-[0.38] saturate-125"
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/65 to-black/30" />
-
-        <div className="relative z-10 max-w-xl space-y-3">
-          <span className="px-3 py-1 rounded-full bg-emerald-400/20 border border-emerald-400/40 text-emerald-300 text-xs font-bold">
-            Step 2 • Study & Test Yourself
-          </span>
-          <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
-            My Study{" "}
-            <span className="font-editorial italic font-normal text-amber-300">
-              Courses
-            </span>
-          </h2>
-          <p className="text-sm sm:text-base text-zinc-200 leading-relaxed">
-            Read simple chapter summaries, review your 1-page formula cheat sheet, and test yourself with a 5-question quiz.
-          </p>
-        </div>
-
-        <button
-          onClick={handleLaunchGenerateModal}
-          className="relative z-10 px-6 py-4 rounded-2xl bg-amber-400 hover:bg-amber-300 text-black text-xs sm:text-sm font-extrabold shadow-xl shadow-amber-400/25 flex items-center space-x-2 shrink-0 self-start sm:self-auto transition-all"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Create New Course</span>
-        </button>
-      </div>
-
-      {courses.length === 0 ? (
-        <div className="py-16 text-center rounded-[32px] glass-panel space-y-4">
-          <GraduationCap className="h-12 w-12 text-amber-300 mx-auto" />
-          <div className="space-y-1">
-            <h3 className="font-display text-xl font-bold text-white">No courses created yet</h3>
-            <p className="text-sm text-zinc-300 max-w-md mx-auto">
-              Pick one of your uploaded PDFs to turn it into easy chapters, a cheat sheet, and quizzes.
-            </p>
-          </div>
-          <button
-            onClick={handleLaunchGenerateModal}
-            className="px-6 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold transition-all shadow-lg"
-          >
-            Create Your First Course
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {courses.map((c, idx) => (
-            <div
-              key={c.id}
-              className="rounded-3xl overflow-hidden glass-panel glass-panel-hover flex flex-col justify-between"
-            >
-              {/* Photo Header */}
-              <div className="relative h-44 overflow-hidden">
-                <img
-                  src={COURSE_PHOTOS[idx % COURSE_PHOTOS.length]}
-                  alt={c.title}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0c0f18] via-black/35 to-transparent" />
-                <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/70 backdrop-blur-md text-xs font-bold text-amber-300 border border-white/15">
-                  {c.modules?.length || 0} Chapters
-                </span>
-                <button
-                  onClick={() => handleDeleteCourse(c.id, c.title)}
-                  className="absolute top-3 right-3 p-2 rounded-full bg-black/70 text-zinc-300 hover:text-rose-400 transition-colors"
-                  title="Delete Course"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-4 flex-1 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <h3 className="font-display text-lg font-bold text-white line-clamp-1">{c.title}</h3>
-                  <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed">
-                    {c.description || "Simple chapter notes, cheat sheet, and quizzes."}
-                  </p>
+                <div className="pt-4 border-t border-[#E2E7ED] flex items-center justify-between gap-3">
+                  <span className="text-xs text-[#64748B]">
+                    Created {new Date(c.created_at).toLocaleDateString()}
+                  </span>
+                  <Link
+                    href={`/app/courses/${c.id}`}
+                    className="inline-flex items-center justify-center h-9 px-4 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs font-medium transition-colors gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] focus-visible:ring-offset-2"
+                  >
+                    <span>Open course</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
                 </div>
-
-                <button
-                  onClick={() => {
-                    setActiveCourseId(c.id);
-                    setSelectedModuleId(c.modules[0]?.id || null);
-                    setSubView("module");
-                  }}
-                  className="w-full py-3 px-4 rounded-2xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold flex items-center justify-center space-x-2 transition-all shadow-md"
-                >
-                  <span>Start Studying</span>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          ))}
+              </Card>
+            );
+          })}
         </div>
       )}
 
       {/* Create Course Modal */}
-      {showGenerateModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel w-full max-w-lg rounded-3xl shadow-2xl p-6 sm:p-8 space-y-6">
-            <div className="space-y-1">
-              <h3 className="font-display text-xl font-bold text-white">Create a Study Course</h3>
-              <p className="text-xs text-zinc-300">
-                Choose a PDF to generate simple chapters, quizzes, and a cheat sheet.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-200">Choose Your PDF</label>
-                <select
-                  value={selectedDocId}
-                  onChange={(e) => setSelectedDocId(e.target.value)}
-                  className="w-full p-3 rounded-xl bg-black/70 border border-white/15 text-xs text-white focus:outline-none focus:border-amber-400"
-                >
-                  {documents.length === 0 ? (
-                    <option value="">No PDFs uploaded yet — upload a PDF first</option>
-                  ) : (
-                    documents.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.original_name} ({d.page_count} pages)
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-200">Course Name</label>
-                <input
-                  type="text"
-                  value={courseTitleInput}
-                  onChange={(e) => setCourseTitleInput(e.target.value)}
-                  placeholder="e.g. Biology Midterm Notes"
-                  className="w-full p-3 rounded-xl bg-black/70 border border-white/15 text-xs text-white focus:outline-none focus:border-amber-400"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-bold text-zinc-200">Number of Chapters</span>
-                  <span className="text-amber-300 font-bold">{moduleCountInput} Chapters</span>
-                </div>
-                <input
-                  type="range"
-                  min="2"
-                  max="8"
-                  value={moduleCountInput}
-                  onChange={(e) => setModuleCountInput(parseInt(e.target.value))}
-                  className="w-full accent-amber-400 cursor-pointer"
-                />
-              </div>
-
-              {generationError && (
-                <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-xs text-rose-200">
-                  {generationError}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end space-x-3 pt-2">
-              <button
-                onClick={() => setShowGenerateModal(false)}
-                className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-zinc-200"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateCourse}
-                disabled={generating || !selectedDocId}
-                className="px-6 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-black text-xs font-extrabold flex items-center space-x-2"
-              >
-                {generating ? (
-                  <>
-                    <span className="h-3.5 w-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                    <span>Building Course...</span>
-                  </>
-                ) : (
-                  <span>Create Course</span>
-                )}
-              </button>
-            </div>
+      <Dialog
+        open={showGenerateModal}
+        onClose={() => !generating && setShowGenerateModal(false)}
+        title="Create course"
+        description="Select an uploaded PDF document to generate study modules, a cheat sheet, and quizzes."
+        maxWidth="md"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setShowGenerateModal(false)}
+              disabled={generating}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              form="create-course-form"
+              disabled={!selectedDocId}
+              loading={generating}
+            >
+              {generating ? "Generating course..." : "Generate course"}
+            </Button>
+          </>
+        }
+      >
+        {documents.length === 0 ? (
+          <div className="space-y-4 py-2 text-center">
+            <p className="text-sm text-[#526170]">
+              You need at least one uploaded PDF document before generating a course.
+            </p>
+            <Link
+              href="/app/documents"
+              className="inline-flex items-center justify-center h-10 px-4 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-sm font-medium gap-2"
+            >
+              <Upload className="h-4 w-4" />
+              <span>Go to Documents</span>
+            </Link>
           </div>
-        </div>
-      )}
+        ) : (
+          <form
+            id="create-course-form"
+            onSubmit={handleCreateCourse}
+            className="space-y-4"
+          >
+            <FormField
+              label="Source PDF document"
+              htmlFor="course-doc-select"
+              required
+            >
+              <Select
+                id="course-doc-select"
+                value={selectedDocId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedDocId(id);
+                  const found = documents.find((d) => d.id === id);
+                  if (found) {
+                    setCourseTitleInput(
+                      found.original_name
+                        .replace(/\.pdf$/i, "")
+                        .replace(/[_-]+/g, " ")
+                    );
+                  }
+                }}
+                disabled={generating}
+              >
+                {documents.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.original_name} ({d.page_count} pages)
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+
+            <FormField
+              label="Course title"
+              htmlFor="course-title-input"
+              hint="Descriptive title for your course."
+              required
+            >
+              <Input
+                id="course-title-input"
+                value={courseTitleInput}
+                onChange={(e) => setCourseTitleInput(e.target.value)}
+                placeholder="e.g. Computer Networks — Transport Layer"
+                required
+                disabled={generating}
+              />
+            </FormField>
+
+            <FormField
+              label={`Target number of modules: ${moduleCountInput}`}
+              htmlFor="course-module-count"
+              hint="Organizes the material into 2 to 8 progressive study modules."
+            >
+              <input
+                id="course-module-count"
+                type="range"
+                min={2}
+                max={8}
+                value={moduleCountInput}
+                onChange={(e) => setModuleCountInput(Number(e.target.value))}
+                disabled={generating}
+                className="w-full accent-[#1D4ED8] cursor-pointer"
+              />
+              <div className="flex justify-between text-[11px] text-[#64748B] font-mono-code">
+                <span>2 modules</span>
+                <span>4 modules</span>
+                <span>8 modules</span>
+              </div>
+            </FormField>
+
+            {generationError && (
+              <InlineBanner variant="error">{generationError}</InlineBanner>
+            )}
+          </form>
+        )}
+      </Dialog>
+
+      {/* Delete Course Confirmation Dialog */}
+      <ConfirmDialog
+        open={Boolean(courseToDelete)}
+        onClose={() => !deleting && setCourseToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Delete course?"
+        description={
+          courseToDelete
+            ? `Are you sure you want to delete "${courseToDelete.title}"? This removes its modules, cheat sheet, and quizzes. Your source PDF document will remain in Documents.`
+            : ""
+        }
+        confirmLabel="Delete course"
+        variant="danger"
+        loading={deleting}
+      />
     </div>
   );
 };

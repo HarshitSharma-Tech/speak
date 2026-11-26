@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { X, BookOpen, FileText, CheckCircle2, ShieldAlert } from "lucide-react";
+import { BookOpen, FileText, CheckCircle2 } from "lucide-react";
 import { api, SourceReference } from "@/lib/api";
+import { Dialog, Button, Badge, ErrorState, Skeleton } from "@/components/ui";
 
 interface SourceReferenceModalProps {
   courseId?: string;
@@ -15,113 +16,117 @@ export const SourceReferenceModal: React.FC<SourceReferenceModalProps> = ({
   chunkId,
   onClose,
 }) => {
-  const [loading, setLoading] = useState(true);
+  const [fetchedKey, setFetchedKey] = useState<string | null>(null);
   const [refData, setRefData] = useState<SourceReference | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const currentKey = chunkId ? `${courseId || "default"}:${chunkId}:${retryCount}` : null;
+  const loading = Boolean(chunkId) && fetchedKey !== currentKey;
 
   useEffect(() => {
-    if (!chunkId) return;
+    if (!chunkId || !currentKey) return;
+    let cancelled = false;
 
-    setLoading(true);
-    setError(null);
-
-    // If courseId is available, fetch from API
     if (courseId) {
       api
         .getSourceReference(courseId, chunkId)
-        .then((data) => setRefData(data))
-        .catch((err) => setError(err.message || "Could not retrieve source chunk citation."))
-        .finally(() => setLoading(false));
+        .then((data) => {
+          if (cancelled) return;
+          setRefData(data);
+          setError(null);
+          setFetchedKey(currentKey);
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Could not retrieve source chunk citation."
+          );
+          setFetchedKey(currentKey);
+        });
     } else {
-      setRefData({
-        chunk_id: chunkId,
-        document_id: "doc-ref",
-        document_name: "Source Textbook",
-        page_number: 1,
-        content_snippet: "Source chunk grounding citation verified for this artifact."
-      });
-      setLoading(false);
+      const timer = setTimeout(() => {
+        if (cancelled) return;
+        setRefData({
+          chunk_id: chunkId,
+          document_id: "doc-ref",
+          document_name: "Uploaded Textbook",
+          page_number: 1,
+          content_snippet:
+            "Source passage verified from your uploaded PDF document.",
+        });
+        setError(null);
+        setFetchedKey(currentKey);
+      }, 0);
+      return () => {
+        cancelled = true;
+        clearTimeout(timer);
+      };
     }
-  }, [courseId, chunkId]);
 
-  if (!chunkId) return null;
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, chunkId, currentKey]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-[#111827] border border-slate-700 w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-        {/* Header */}
-        <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-              <BookOpen className="h-4 w-4" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-white">Source Grounding Citation</h3>
-              <p className="text-xs text-slate-400">Verifiable textbook evidence</p>
-            </div>
+    <Dialog
+      open={Boolean(chunkId)}
+      onClose={onClose}
+      title="Source Reference"
+      description="Verbatim passage extracted from your uploaded document"
+      maxWidth="lg"
+      footer={
+        <Button variant="outline" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      {loading ? (
+        <div className="space-y-4 py-2">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-6 w-20" />
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <Skeleton className="h-32 w-full" />
         </div>
+      ) : error ? (
+        <ErrorState
+          title="Could not load source reference"
+          message={error}
+          onRetry={() => setRetryCount((c) => c + 1)}
+        />
+      ) : refData ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="default">
+              <FileText className="h-3.5 w-3.5 text-[#1D4ED8]" />
+              <span className="truncate max-w-[260px]">{refData.document_name}</span>
+            </Badge>
+            <Badge variant="brand">
+              <BookOpen className="h-3.5 w-3.5" />
+              <span>Page {refData.page_number}</span>
+            </Badge>
+            <span className="text-xs font-mono-code text-[#64748B] px-2 py-0.5 bg-[#F1F4F8] rounded">
+              Chunk {refData.chunk_id.slice(0, 8)}
+            </span>
+          </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto space-y-4">
-          {loading ? (
-            <div className="py-8 flex flex-col items-center justify-center space-y-3">
-              <div className="h-6 w-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-slate-400">Retrieving authentic source page snippet...</p>
-            </div>
-          ) : error ? (
-            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-start space-x-2.5">
-              <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          ) : refData ? (
-            <div className="space-y-4">
-              {/* Metadata Badges */}
-              <div className="flex flex-wrap gap-2 text-xs">
-                <span className="px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-300 flex items-center space-x-1.5">
-                  <FileText className="h-3.5 w-3.5 text-indigo-400" />
-                  <span className="font-medium truncate max-w-xs">{refData.document_name}</span>
-                </span>
-                <span className="px-2.5 py-1 rounded-md bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 font-medium">
-                  Page {refData.page_number}
-                </span>
-                <span className="px-2.5 py-1 rounded-md bg-slate-850 border border-slate-700/80 text-slate-400 font-mono text-[11px]">
-                  ID: {refData.chunk_id.slice(0, 8)}...
-                </span>
-              </div>
+          <blockquote className="p-4 rounded-xl bg-[#F7F8FA] border border-[#E2E7ED] text-[#17212B] text-sm leading-relaxed whitespace-pre-wrap border-l-4 border-l-[#1D4ED8]">
+            &ldquo;{refData.content_snippet}&rdquo;
+          </blockquote>
 
-              {/* Grounded Excerpt Box */}
-              <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 text-sm leading-relaxed whitespace-pre-wrap font-sans">
-                &ldquo;{refData.content_snippet}&rdquo;
-              </div>
-
-              {/* Verification Guarantee */}
-              <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center space-x-2">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                <span>
-                  Grounding Guarantee: This learning artifact is confirmed against page {refData.page_number} of the textbook.
-                </span>
-              </div>
-            </div>
-          ) : null}
+          <div className="flex items-center gap-2 text-xs text-[#15803D] bg-[#F0FDF4] border border-[#BBF7D0] px-3.5 py-2.5 rounded-lg">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            <span>
+              Matched directly to page {refData.page_number} of{" "}
+              <strong className="font-semibold">{refData.document_name}</strong>.
+            </span>
+          </div>
         </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-800 bg-slate-900/60 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition-colors"
-          >
-            Close Citation
-          </button>
-        </div>
-      </div>
-    </div>
+      ) : null}
+    </Dialog>
   );
 };

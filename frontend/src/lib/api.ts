@@ -197,6 +197,42 @@ export interface SourceReference {
   similarity_score?: number;
 }
 
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+}
+
+export interface PyqEvaluation {
+  score: number;
+  verdict: "Strong" | "Good" | "Needs work" | "Weak";
+  covered_points: string[];
+  missing_points: string[];
+  feedback: string;
+  improved_answer: string;
+  graded_by: "ai" | "heuristic";
+}
+
+function extractErrorMessage(err: unknown, fallback: string): string {
+  if (err && typeof err === "object" && "detail" in err) {
+    const detail = (err as { detail: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) {
+      return detail;
+    }
+    if (Array.isArray(detail)) {
+      return "Please check your details";
+    }
+  }
+  return fallback;
+}
+
 export const api = {
   // Health & Provider Key Management
   checkHealth: async () => {
@@ -331,7 +367,7 @@ export const api = {
     pyq_document_id?: string;
     exam_date: string;
     daily_study_hours: number;
-    preferences?: Record<string, any>;
+    preferences?: Record<string, unknown>;
   }): Promise<SprintItem> => {
     const res = await fetch(`${API_BASE}/sprints`, {
       method: "POST",
@@ -437,5 +473,96 @@ export const api = {
   deleteInterview: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/interviews/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error("Failed to delete interview session");
+  },
+
+  // Auth & Cloud Progress Sync
+  register: async (
+    email: string,
+    name: string,
+    password: string
+  ): Promise<AuthResponse> => {
+    const res = await fetch(`${API_BASE}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, name, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(err, "Registration failed"));
+    }
+    return res.json();
+  },
+
+  login: async (email: string, password: string): Promise<AuthResponse> => {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(err, "Invalid email or password."));
+    }
+    return res.json();
+  },
+
+  me: async (token: string): Promise<AuthUser> => {
+    const res = await fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      throw new Error("UNAUTHORIZED");
+    }
+    if (!res.ok) {
+      throw new Error("Failed to verify account session");
+    }
+    return res.json();
+  },
+
+  getProgress: async (
+    token: string
+  ): Promise<{ data: Record<string, unknown>; updated_at: string | null }> => {
+    const res = await fetch(`${API_BASE}/progress`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error("Failed to fetch synced progress");
+    return res.json();
+  },
+
+  putProgress: async (
+    token: string,
+    data: unknown
+  ): Promise<{ data: Record<string, unknown>; updated_at: string | null }> => {
+    const res = await fetch(`${API_BASE}/progress`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ data }),
+    });
+    if (!res.ok) throw new Error("Failed to sync progress");
+    return res.json();
+  },
+
+  // Practice PYQ Answer Evaluation
+  evaluatePyqAnswer: async (payload: {
+    question: string;
+    model_approach?: string;
+    category?: string;
+    difficulty?: string;
+    company?: string;
+    answer_text: string;
+  }): Promise<PyqEvaluation> => {
+    const res = await fetch(`${API_BASE}/practice/evaluate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(err, "Failed to evaluate answer"));
+    }
+    return res.json();
   },
 };

@@ -3,6 +3,7 @@ from app.models.course import Course, Module, CheatSheet
 from app.models.quiz import Quiz, QuizQuestion, QuizAttempt
 from app.models.sprint import Sprint, SprintTopic, SprintTask, SprintRegenerationHistory
 from app.models.interview import InterviewSession, InterviewQuestion, InterviewReport
+from app.models.user import User, UserProgress
 
 __all__ = [
     "Document",
@@ -20,4 +21,6 @@ __all__ = [
     "InterviewSession",
     "InterviewQuestion",
     "InterviewReport",
+    "User",
+    "UserProgress",
 ]

@@ -1,24 +1,11 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, Syne, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans, JetBrains_Mono, Fraunces } from "next/font/google";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
   variable: "--font-jakarta",
-  weight: ["400", "500", "600", "700", "800"],
-});
-
-const syne = Syne({
-  subsets: ["latin"],
-  variable: "--font-syne",
-  weight: ["600", "700", "800"],
-});
-
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  variable: "--font-serif",
-  weight: ["400"],
-  style: ["normal", "italic"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -27,17 +14,27 @@ const jetbrainsMono = JetBrains_Mono({
   weight: ["400", "500", "600"],
 });
 
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-display",
+  weight: ["600", "700"],
+});
+
 export const metadata: Metadata = {
-  title: "LearnSync Studio — Editorial Study OS & Voice Mentor",
+  title: {
+    default: "LearnSync — Grounded Study Workspace",
+    template: "%s | LearnSync",
+  },
   description:
-    "Transform textbooks into structured curriculums, high-yield exam roadmaps, and live voice-adaptive technical interviews.",
+    "Turn uploaded textbooks, past exam papers, and resumes into structured courses, cited quizzes, daily exam plans, company PYQs, and practice interviews.",
   keywords: [
-    "LearnSync Studio",
-    "Study OS",
-    "Exam Sprint Planner",
-    "Voice Mock Interview",
-    "Textbook Curriculum",
-    "Grounded Quiz",
+    "LearnSync",
+    "Study Workspace",
+    "Exam Planner",
+    "Company Interview Questions",
+    "Mock Interview Practice",
+    "Textbook Course Generator",
+    "Cited Quizzes",
   ],
 };
 
@@ -49,9 +46,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`dark h-full ${jakarta.variable} ${syne.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable}`}
+      className={`h-full ${jakarta.variable} ${jetbrainsMono.variable} ${fraunces.variable}`}
     >
-      <body className="min-h-full bg-[#06070a] text-[#f4f4f6] antialiased selection:bg-amber-500 selection:text-black">
+      <body className="min-h-full bg-[#F7F8FA] text-[#17212B] antialiased selection:bg-[#1D4ED8]/15 selection:text-[#1D4ED8]">
         {children}
       </body>
     </html>

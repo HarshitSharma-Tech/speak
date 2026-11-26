@@ -1,41 +1,659 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   CalendarDays,
   CheckCircle2,
   Clock,
   RotateCcw,
-  Sparkles,
-  FileText,
-  AlertTriangle,
-  ArrowRight,
-  TrendingUp,
-  Target,
   BarChart3,
   Trash2,
-  Plus
+  Plus,
+  ArrowRight,
+  Info,
+  Upload,
+  BookOpen,
 } from "lucide-react";
-import { SprintItem, DocumentItem, SprintTopic, SprintTask, api } from "@/lib/api";
+import { SprintItem, api } from "@/lib/api";
+import { useWorkspace } from "@/context/WorkspaceContext";
+import {
+  PageHeader,
+  Card,
+  Button,
+  Badge,
+  Dialog,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  InlineBanner,
+  FormField,
+  Input,
+  Select,
+  Skeleton,
+} from "@/components/ui";
 
-interface SprintViewProps {
-  sprints: SprintItem[];
-  documents: DocumentItem[];
-  onRefresh: () => void;
-  selectedSprintId?: string | null;
-}
+type TaskFilterType =
+  | "All"
+  | "Topic Study"
+  | "Revision"
+  | "Practice Questions"
+  | "Mock Test";
 
-export const SprintView: React.FC<SprintViewProps> = ({
-  sprints,
-  documents,
-  onRefresh,
-  selectedSprintId: initialSelectedSprintId,
+/* ============================================================================
+   EXAM PLAN DETAIL VIEW (/app/sprints/[sprintId])
+============================================================================ */
+
+export const SprintDetailView: React.FC<{ sprintId: string }> = ({
+  sprintId,
 }) => {
-  const [activeSprintId, setActiveSprintId] = useState<string | null>(initialSelectedSprintId || null);
+  const router = useRouter();
+  const {
+    sprints,
+    loading: workspaceLoading,
+    refreshSprints,
+    notify,
+    openCitation,
+  } = useWorkspace();
 
-  // New Sprint Modal State
+  const [fetchedSprint, setFetchedSprint] = useState<SprintItem | null>(null);
+  const [checkedSprintId, setCheckedSprintId] = useState<string | null>(null);
+
+  const inContextSprint = sprints.find((s) => s.id === sprintId) || null;
+  const sprint =
+    inContextSprint ||
+    (fetchedSprint?.id === sprintId ? fetchedSprint : null);
+
+  const [taskFilter, setTaskFilter] = useState<TaskFilterType>("All");
+  const [togglingTaskId, setTogglingTaskId] = useState<string | null>(null);
+
+  // Regeneration Modal State
+  const [showRegenModal, setShowRegenModal] = useState(false);
+  const [regenDate, setRegenDate] = useState("");
+  const [regenHours, setRegenHours] = useState(3.0);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
+
+  // Delete Confirmation Modal State
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (inContextSprint || workspaceLoading) return;
+    let cancelled = false;
+    api
+      .getSprint(sprintId)
+      .then((data) => {
+        if (cancelled) return;
+        setFetchedSprint(data);
+        setCheckedSprintId(sprintId);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFetchedSprint(null);
+        setCheckedSprintId(sprintId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sprintId, inContextSprint, workspaceLoading]);
+
+  const fetchingDetail =
+    !inContextSprint && !workspaceLoading && checkedSprintId !== sprintId;
+  const notFound =
+    !inContextSprint &&
+    !workspaceLoading &&
+    checkedSprintId === sprintId &&
+    !sprint;
+
+  const handleToggleTask = async (taskId: string, currentStatus: boolean) => {
+    if (!sprint) return;
+    setTogglingTaskId(taskId);
+    try {
+      await api.toggleSprintTask(sprint.id, taskId, !currentStatus);
+      await refreshSprints();
+      if (fetchedSprint) {
+        const updated = await api.getSprint(sprint.id);
+        setFetchedSprint(updated);
+      }
+      notify(
+        "success",
+        !currentStatus ? "Task marked as completed." : "Task marked as incomplete."
+      );
+    } catch (err: unknown) {
+      notify(
+        "error",
+        err instanceof Error ? err.message : "Could not update task status."
+      );
+    } finally {
+      setTogglingTaskId(null);
+    }
+  };
+
+  const handleOpenRegenModal = () => {
+    if (!sprint) return;
+    setRegenDate(sprint.exam_date.split("T")[0]);
+    setRegenHours(sprint.daily_study_hours);
+    setRegenError(null);
+    setShowRegenModal(true);
+  };
+
+  const handleRegenerateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sprint) return;
+    setRegenerating(true);
+    setRegenError(null);
+
+    try {
+      const updated = await api.regenerateSprint(sprint.id, {
+        exam_date: new Date(regenDate).toISOString(),
+        daily_study_hours: regenHours,
+      });
+      await refreshSprints();
+      setFetchedSprint(updated);
+      setShowRegenModal(false);
+      notify(
+        "success",
+        `Schedule regenerated. ${updated.completed_tasks_count} completed tasks were preserved.`
+      );
+    } catch (err: unknown) {
+      setRegenError(
+        err instanceof Error ? err.message : "Could not regenerate schedule."
+      );
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const handleDeleteSprint = async () => {
+    if (!sprint) return;
+    setDeleting(true);
+    try {
+      await api.deleteSprint(sprint.id);
+      await refreshSprints();
+      notify("success", `Deleted exam plan "${sprint.title}".`);
+      router.push("/app/sprints");
+    } catch (err: unknown) {
+      notify(
+        "error",
+        err instanceof Error ? err.message : "Could not delete exam plan."
+      );
+      setDeleting(false);
+    }
+  };
+
+  if (workspaceLoading || fetchingDetail) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-36 w-full" />
+        <Skeleton className="h-80 w-full" />
+      </div>
+    );
+  }
+
+  if (notFound || !sprint) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Exam plan not found"
+          breadcrumbs={[
+            { label: "Exam plans", href: "/app/sprints" },
+            { label: "Not found" },
+          ]}
+        />
+        <EmptyState
+          icon={<CalendarDays className="h-6 w-6" />}
+          title="This exam plan is unavailable or was deleted"
+          description="Return to the exam plans list to open an active schedule or create a new one."
+          action={
+            <Link
+              href="/app/sprints"
+              className="inline-flex items-center justify-center h-10 px-4 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-sm font-medium"
+            >
+              Back to Exam plans
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  const filteredTasks = sprint.tasks.filter(
+    (t) => taskFilter === "All" || t.task_type === taskFilter
+  );
+
+  const allCompleted =
+    sprint.tasks.length > 0 &&
+    sprint.completed_tasks_count === sprint.tasks.length;
+
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title={sprint.title}
+        description={`Target exam date: ${new Date(
+          sprint.exam_date
+        ).toLocaleDateString()} • ${sprint.daily_study_hours} hours/day allocation`}
+        breadcrumbs={[
+          { label: "Exam plans", href: "/app/sprints" },
+          { label: sprint.title },
+        ]}
+        badge={
+          <Badge variant={allCompleted ? "success" : "brand"}>
+            {sprint.progress_percentage}% complete
+          </Badge>
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleOpenRegenModal}
+              icon={<RotateCcw className="h-3.5 w-3.5" />}
+            >
+              Adjust schedule
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmDeleteOpen(true)}
+              icon={<Trash2 className="h-3.5 w-3.5 text-[#B91C1C]" />}
+              title="Delete exam plan"
+            >
+              Delete
+            </Button>
+          </div>
+        }
+      />
+
+      {/* Progress Summary Card */}
+      <Card className="p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-[#17212B]">
+              Preparation progress
+            </h2>
+            <p className="text-xs text-[#526170]">
+              {sprint.completed_tasks_count} of {sprint.tasks.length} scheduled
+              study tasks completed across {sprint.total_days} study days.
+            </p>
+          </div>
+          <span className="font-mono-code text-lg font-bold text-[#1D4ED8]">
+            {sprint.progress_percentage}%
+          </span>
+        </div>
+
+        <div className="w-full h-2.5 bg-[#F1F4F8] rounded-full overflow-hidden">
+          <div
+            className="h-full bg-[#1D4ED8] rounded-full transition-all duration-300"
+            style={{ width: `${sprint.progress_percentage}%` }}
+          />
+        </div>
+
+        {allCompleted && (
+          <InlineBanner variant="success" title="All scheduled tasks completed">
+            You have completed every task in this exam preparation schedule. You can still review individual topics or adjust the schedule if your exam date changes.
+          </InlineBanner>
+        )}
+      </Card>
+
+      {/* Section 1: Daily Preparation Agenda */}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-[#17212B] flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-[#1D4ED8]" />
+              <span>Daily study agenda ({filteredTasks.length})</span>
+            </h2>
+            <p className="text-xs text-[#526170]">
+              Check off tasks as you finish them. Completed tasks are preserved if you regenerate the schedule.
+            </p>
+          </div>
+
+          <div
+            role="tablist"
+            aria-label="Filter tasks by type"
+            className="flex flex-wrap gap-1.5"
+          >
+            {(
+              [
+                "All",
+                "Topic Study",
+                "Revision",
+                "Practice Questions",
+                "Mock Test",
+              ] as const
+            ).map((filter) => {
+              const active = taskFilter === filter;
+              return (
+                <button
+                  key={filter}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTaskFilter(filter)}
+                  className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+                    active
+                      ? "bg-[#1D4ED8] text-white"
+                      : "bg-white border border-[#E2E7ED] text-[#526170] hover:text-[#17212B]"
+                  }`}
+                >
+                  {filter}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {filteredTasks.length === 0 ? (
+          <Card className="p-8 text-center text-xs text-[#526170]">
+            No tasks match the selected filter ({taskFilter}).
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            {filteredTasks.map((tk) => {
+              const isCompleted = tk.is_completed;
+              const isUpdating = togglingTaskId === tk.id;
+              const taskDate = new Date(tk.scheduled_date).toLocaleDateString(
+                undefined,
+                {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                }
+              );
+
+              const typeBadgeVariant: Record<
+                string,
+                "brand" | "amber" | "default" | "success"
+              > = {
+                "Topic Study": "brand",
+                Revision: "default",
+                "Practice Questions": "amber",
+                "Mock Test": "success",
+              };
+
+              return (
+                <Card
+                  key={tk.id}
+                  className={`p-4 transition-colors ${
+                    isCompleted ? "bg-[#F7F8FA]" : "bg-white hover:border-[#CBD5E1]"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      onClick={() => handleToggleTask(tk.id, isCompleted)}
+                      aria-pressed={isCompleted}
+                      className="flex items-start gap-3 text-left flex-1 min-w-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] rounded-lg"
+                    >
+                      <span
+                        className={`mt-0.5 h-5 w-5 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                          isCompleted
+                            ? "bg-[#15803D] border-[#15803D] text-white"
+                            : "bg-white border-[#CBD5E1] text-transparent hover:border-[#1D4ED8]"
+                        }`}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      </span>
+
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-mono-code font-semibold text-[#526170]">
+                            Day {tk.day_number} &bull; {taskDate}
+                          </span>
+                          <Badge
+                            variant={typeBadgeVariant[tk.task_type] || "default"}
+                          >
+                            {tk.task_type}
+                          </Badge>
+                        </div>
+
+                        <h3
+                          className={`text-sm font-semibold leading-snug ${
+                            isCompleted
+                              ? "line-through text-[#64748B]"
+                              : "text-[#17212B]"
+                          }`}
+                        >
+                          {tk.title}
+                        </h3>
+
+                        {tk.description && (
+                          <p className="text-xs text-[#526170] leading-relaxed">
+                            {tk.description}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+
+                    <span className="text-xs font-mono-code text-[#64748B] flex items-center gap-1 shrink-0 pt-0.5">
+                      <Clock className="h-3.5 w-3.5" />
+                      {tk.estimated_minutes}m
+                    </span>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Section 2: Topic Priority, Observed Frequency, and Textbook Match */}
+      <Card className="p-6 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+          <div className="space-y-1 max-w-2xl">
+            <h2 className="text-base font-bold text-[#17212B] flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-[#1D4ED8]" />
+              <span>Topic priority & syllabus breakdown</span>
+            </h2>
+            <p className="text-xs text-[#526170] leading-relaxed">
+              Each topic is ranked by combining its <strong>observed question frequency</strong> (how many times it appeared in your uploaded past papers) and its <strong>textbook match confidence</strong> (semantic similarity to your textbook chapters).
+            </p>
+          </div>
+
+          <div className="p-3 rounded-lg bg-[#FFFBEB] border border-[#FDE68A] text-xs text-[#B45309] flex items-start gap-2 max-w-md">
+            <Info className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>
+              <strong>Note on priority rankings:</strong> Observed frequency reflects recurring emphasis in past papers, not a guaranteed prediction of future exam questions.
+            </span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto -mx-6 px-6">
+          <table className="w-full text-left text-xs border-collapse min-w-[640px]">
+            <thead>
+              <tr className="border-b border-[#E2E7ED] text-[#526170] bg-[#F7F8FA]">
+                <th className="py-3 px-3 font-semibold">Priority rank</th>
+                <th className="py-3 px-3 font-semibold">Topic</th>
+                <th className="py-3 px-3 font-semibold">
+                  Observed question frequency
+                </th>
+                <th className="py-3 px-3 font-semibold">
+                  Textbook match confidence
+                </th>
+                <th className="py-3 px-3 font-semibold">Rationale & source</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E2E7ED]">
+              {sprint.topics.map((t) => {
+                const priorityVariant =
+                  t.priority_level === "High"
+                    ? "amber"
+                    : t.priority_level === "Medium"
+                    ? "brand"
+                    : "default";
+
+                return (
+                  <tr
+                    key={t.id}
+                    className="hover:bg-[#F7F8FA] transition-colors"
+                  >
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono-code font-bold text-[#17212B]">
+                          #{t.priority_rank}
+                        </span>
+                        <Badge variant={priorityVariant}>
+                          {t.priority_level}
+                        </Badge>
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-3 font-semibold text-[#17212B]">
+                      {t.name}
+                    </td>
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      <span className="px-2 py-0.5 rounded bg-[#F1F4F8] text-[#17212B] font-mono-code">
+                        {t.observed_frequency}{" "}
+                        {t.observed_frequency === 1 ? "occurrence" : "occurrences"}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      <span className="font-mono-code font-semibold text-[#1D4ED8]">
+                        {Math.round(t.similarity_confidence * 100)}% match
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3 text-[#526170] max-w-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate" title={t.calculation_notes}>
+                          {t.calculation_notes ||
+                            "Weighted by observed frequency and textbook similarity."}
+                        </span>
+                        {t.source_chunk_ids?.[0] && (
+                          <button
+                            type="button"
+                            onClick={() => openCitation(t.source_chunk_ids[0])}
+                            className="text-[#1D4ED8] font-medium hover:underline shrink-0 cursor-pointer"
+                          >
+                            Source
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* Regenerate Schedule Modal (With Clear Explanation Before Submission) */}
+      <Dialog
+        open={showRegenModal}
+        onClose={() => !regenerating && setShowRegenModal(false)}
+        title="Adjust & regenerate schedule"
+        description="Update your target exam date or daily study hours."
+        maxWidth="md"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setShowRegenModal(false)}
+              disabled={regenerating}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              form="regen-sprint-form"
+              loading={regenerating}
+            >
+              {regenerating ? "Recalibrating..." : "Regenerate schedule"}
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="regen-sprint-form"
+          onSubmit={handleRegenerateSubmit}
+          className="space-y-4"
+        >
+          <InlineBanner variant="info" title="What happens when you regenerate">
+            Your <strong>{sprint.completed_tasks_count} completed tasks</strong>{" "}
+            and completion history are strictly preserved. All remaining
+            incomplete tasks will be recalculated and redistributed between today
+            and your updated exam date.
+          </InlineBanner>
+
+          <FormField
+            label="Updated exam date"
+            htmlFor="regen-exam-date"
+            required
+          >
+            <Input
+              id="regen-exam-date"
+              type="date"
+              value={regenDate}
+              onChange={(e) => setRegenDate(e.target.value)}
+              required
+              disabled={regenerating}
+            />
+          </FormField>
+
+          <FormField
+            label={`Daily study hours: ${regenHours} hours/day`}
+            htmlFor="regen-daily-hours"
+          >
+            <input
+              id="regen-daily-hours"
+              type="range"
+              min={1}
+              max={8}
+              step={0.5}
+              value={regenHours}
+              onChange={(e) => setRegenHours( parseFloat(e.target.value) )}
+              disabled={regenerating}
+              className="w-full accent-[#1D4ED8] cursor-pointer"
+            />
+            <div className="flex justify-between text-[11px] text-[#64748B] font-mono-code">
+              <span>1 hr/day</span>
+              <span>4 hrs/day</span>
+              <span>8 hrs/day</span>
+            </div>
+          </FormField>
+
+          {regenError && <InlineBanner variant="error">{regenError}</InlineBanner>}
+        </form>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onClose={() => !deleting && setConfirmDeleteOpen(false)}
+        onConfirm={handleDeleteSprint}
+        title="Delete exam plan?"
+        description={`Are you sure you want to delete "${sprint.title}"? This removes the topic rankings and task checklist. Your uploaded PDF documents will remain untouched.`}
+        confirmLabel="Delete exam plan"
+        variant="danger"
+        loading={deleting}
+      />
+    </div>
+  );
+};
+
+/* ============================================================================
+   EXAM PLANS LIST & CREATION VIEW (/app/sprints)
+============================================================================ */
+
+export const SprintView: React.FC<{ selectedSprintId?: string | null }> = ({
+  selectedSprintId,
+}) => {
+  const router = useRouter();
+  const {
+    sprints,
+    documents,
+    loading,
+    errors,
+    refreshSprints,
+    notify,
+  } = useWorkspace();
+
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [sprintTitle, setSprintTitle] = useState("Final Semester Exam Sprint");
+  const [sprintTitle, setSprintTitle] = useState("");
   const [textbookId, setTextbookId] = useState("");
   const [pyqId, setPyqId] = useState("");
   const [examDate, setExamDate] = useState(() => {
@@ -45,549 +663,387 @@ export const SprintView: React.FC<SprintViewProps> = ({
   });
   const [dailyHours, setDailyHours] = useState(3.0);
   const [creating, setCreating] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
-  // Regeneration Modal State
-  const [showRegenModal, setShowRegenModal] = useState(false);
-  const [regenDate, setRegenDate] = useState(examDate);
-  const [regenHours, setRegenHours] = useState(dailyHours);
-  const [regenerating, setRegenerating] = useState(false);
+  const [sprintToDelete, setSprintToDelete] = useState<SprintItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  // Task filter
-  const [taskFilter, setTaskFilter] = useState<"All" | "Topic Study" | "Revision" | "Practice Questions" | "Mock Test">("All");
+  if (selectedSprintId) {
+    return <SprintDetailView sprintId={selectedSprintId} />;
+  }
 
-  const activeSprint = sprints.find((s) => s.id === activeSprintId) || sprints[0] || null;
+  const handleOpenCreateModal = () => {
+    const tb =
+      documents.find((d) => d.file_type === "textbook") || documents[0];
+    const pyq = documents.find((d) => d.file_type === "pyq");
+    setTextbookId(tb?.id || "");
+    setPyqId(pyq?.id || "");
+    setSprintTitle(
+      tb
+        ? `${tb.original_name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ")} Exam Plan`
+        : "Final Exam Preparation Plan"
+    );
+    setCreateError(null);
+    setShowCreateModal(true);
+  };
 
-  const handleCreateSprint = async () => {
+  const handleCreateSprintSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!textbookId) {
-      setErrorMsg("Please select a textbook document.");
+      setCreateError("Please select an uploaded textbook or notes PDF.");
       return;
     }
 
     setCreating(true);
-    setErrorMsg(null);
+    setCreateError(null);
 
     try {
       const created = await api.createSprint({
-        title: sprintTitle,
+        title: sprintTitle.trim() || "Exam Preparation Plan",
         textbook_document_id: textbookId,
         pyq_document_id: pyqId || undefined,
         exam_date: new Date(examDate).toISOString(),
         daily_study_hours: dailyHours,
       });
-      onRefresh();
+      await refreshSprints();
       setShowCreateModal(false);
-      setActiveSprintId(created.id);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to create sprint planner.");
+      notify("success", `Created exam plan "${created.title}".`);
+      router.push(`/app/sprints/${created.id}`);
+    } catch (err: unknown) {
+      setCreateError(
+        err instanceof Error ? err.message : "Could not create exam plan."
+      );
     } finally {
       setCreating(false);
     }
   };
 
-  const handleToggleTask = async (sprintId: string, taskId: string, currentStatus: boolean) => {
+  const handleConfirmDelete = async () => {
+    if (!sprintToDelete) return;
+    setDeleting(true);
     try {
-      await api.toggleSprintTask(sprintId, taskId, !currentStatus);
-      onRefresh();
-    } catch (err: any) {
-      alert("Error updating task: " + err.message);
-    }
-  };
-
-  const handleRegenerateSprint = async () => {
-    if (!activeSprint) return;
-
-    setRegenerating(true);
-    try {
-      await api.regenerateSprint(activeSprint.id, {
-        exam_date: new Date(regenDate).toISOString(),
-        daily_study_hours: regenHours,
-      });
-      onRefresh();
-      setShowRegenModal(false);
-    } catch (err: any) {
-      alert("Error regenerating schedule: " + err.message);
+      await api.deleteSprint(sprintToDelete.id);
+      await refreshSprints();
+      notify("success", `Deleted exam plan "${sprintToDelete.title}".`);
+      setSprintToDelete(null);
+    } catch (err: unknown) {
+      notify(
+        "error",
+        err instanceof Error ? err.message : "Could not delete exam plan."
+      );
     } finally {
-      setRegenerating(false);
+      setDeleting(false);
     }
   };
-
-  const handleDeleteSprint = async (sprintId: string, title: string) => {
-    if (!confirm(`Delete sprint planner "${title}"?`)) return;
-    try {
-      await api.deleteSprint(sprintId);
-      if (activeSprintId === sprintId) setActiveSprintId(null);
-      onRefresh();
-    } catch (err: any) {
-      alert("Error deleting sprint: " + err.message);
-    }
-  };
-
-  const filteredTasks = activeSprint?.tasks.filter((t) => taskFilter === "All" || t.task_type === taskFilter) || [];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-10">
-      {/* Photo Hero Banner */}
-      <div className="relative rounded-[32px] overflow-hidden border border-white/15 shadow-2xl p-8 sm:p-12 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-        <img
-          src="/media/photo-exam.jpg"
-          alt="Exam planning desk"
-          className="absolute inset-0 w-full h-full object-cover filter brightness-[0.38] saturate-125"
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/65 to-black/30" />
-
-        <div className="relative z-10 max-w-xl space-y-3">
-          <span className="px-3 py-1 rounded-full bg-sky-400/20 border border-sky-400/40 text-sky-300 text-xs font-bold">
-            Step 3 • Daily Exam Planner
-          </span>
-          <h2 className="font-display text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
-            Your Daily{" "}
-            <span className="font-editorial italic font-normal text-amber-300">
-              Exam Plan
-            </span>
-          </h2>
-          <p className="text-sm sm:text-base text-zinc-200 leading-relaxed">
-            Tell us your exam date and study hours. We find the most repeated exam topics and give you a simple day-by-day checklist.
-          </p>
-        </div>
-
-        <button
-          onClick={() => {
-            const tb = documents.find((d) => d.file_type === "textbook") || documents[0];
-            const pyq = documents.find((d) => d.file_type === "pyq");
-            if (tb) setTextbookId(tb.id);
-            if (pyq) setPyqId(pyq.id);
-            setShowCreateModal(true);
-          }}
-          className="relative z-10 px-6 py-4 rounded-2xl bg-amber-400 hover:bg-amber-300 text-black text-xs sm:text-sm font-extrabold shadow-xl shadow-amber-400/25 flex items-center space-x-2 shrink-0 self-start sm:self-auto transition-all"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Create Exam Plan</span>
-        </button>
-      </div>
-
-      {!activeSprint ? (
-        <div className="py-16 text-center rounded-3xl glass-panel space-y-4">
-          <CalendarDays className="h-10 w-10 text-slate-600 mx-auto" />
-          <div className="space-y-1">
-            <h3 className="text-base font-bold text-slate-200">No Exam Sprints Created</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Create an exam sprint to rank syllabus topics by previous-year question frequency and generate a day-by-day study plan until your exam.
-            </p>
-          </div>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md"
+    <div className="space-y-8">
+      <PageHeader
+        title="Exam plans"
+        description="Build a day-by-day preparation schedule ranked by observed question frequency in past papers and semantic match against your textbook."
+        actions={
+          <Button
+            variant="primary"
+            onClick={handleOpenCreateModal}
+            icon={<Plus className="h-4 w-4" />}
           >
-            Create Sprint Plan
-          </button>
+            Create exam plan
+          </Button>
+        }
+      />
+
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Skeleton className="h-48" />
+          <Skeleton className="h-48" />
         </div>
+      ) : errors.sprints ? (
+        <ErrorState
+          title="Could not load exam plans"
+          message={errors.sprints}
+          onRetry={refreshSprints}
+        />
+      ) : sprints.length === 0 ? (
+        <EmptyState
+          icon={<CalendarDays className="h-6 w-6" />}
+          title="No exam plans created yet"
+          description={
+            documents.length > 0
+              ? "Select a textbook PDF and an optional past question paper (PYQ) to rank topics and generate a daily checklist until your exam date."
+              : "Upload a textbook PDF in Documents first, then create your daily exam plan here."
+          }
+          action={
+            documents.length > 0 ? (
+              <Button
+                variant="primary"
+                onClick={handleOpenCreateModal}
+                icon={<Plus className="h-4 w-4" />}
+              >
+                Create your first exam plan
+              </Button>
+            ) : (
+              <Link
+                href="/app/documents"
+                className="inline-flex items-center justify-center h-10 px-4 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-sm font-medium gap-2"
+              >
+                <Upload className="h-4 w-4" />
+                <span>Upload a PDF document</span>
+              </Link>
+            )
+          }
+        />
       ) : (
-        <div className="space-y-8">
-          {/* Active Sprint Overview Card */}
-          <div className="p-6 rounded-3xl glass-panel border border-indigo-500/20 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    Exam: {new Date(activeSprint.exam_date).toLocaleDateString()}
-                  </span>
-                  <span className="text-xs text-slate-400">{activeSprint.daily_study_hours} hrs daily target</span>
-                </div>
-                <h3 className="text-2xl font-black text-white">{activeSprint.title}</h3>
-              </div>
-
-              <div className="flex items-center space-x-2.5">
-                <button
-                  onClick={() => {
-                    setRegenDate(activeSprint.exam_date.split("T")[0]);
-                    setRegenHours(activeSprint.daily_study_hours);
-                    setShowRegenModal(true);
-                  }}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center space-x-1.5 transition-colors"
-                >
-                  <RotateCcw className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>Regenerate (Preserve Progress)</span>
-                </button>
-                <button
-                  onClick={() => handleDeleteSprint(activeSprint.id, activeSprint.title)}
-                  className="p-2 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors"
-                  title="Delete Sprint"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Progress Bar & Stats */}
-            <div className="space-y-2 pt-2">
-              <div className="flex justify-between text-xs font-medium">
-                <span className="text-slate-300">
-                  Sprint Completion: {activeSprint.completed_tasks_count} of {activeSprint.tasks.length} tasks
-                </span>
-                <span className="text-emerald-400 font-bold">{activeSprint.progress_percentage}% Completed</span>
-              </div>
-              <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-indigo-500 to-emerald-400 h-2.5 rounded-full transition-all duration-500"
-                  style={{ width: `${activeSprint.progress_percentage}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Section 1: Ranked Syllabus Topics from PYQ & Cosine Similarity */}
-          <div className="p-6 rounded-3xl glass-panel space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                  <BarChart3 className="h-4 w-4 text-indigo-400" />
-                  <span>Topic Priority & Frequency Ranking</span>
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Calculated from observed question frequency in PYQs matched against textbook chunks via cosine similarity.
-                </p>
-              </div>
-              {/* Methodological Transparency Disclaimer */}
-              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300 flex items-center space-x-2 self-start">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                <span>Notice: High past frequency indicates historical emphasis, not guaranteed future appearance.</span>
-              </div>
-            </div>
-
-            {/* Topics Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400">
-                    <th className="py-2.5 px-3">Rank</th>
-                    <th className="py-2.5 px-3">Topic Name</th>
-                    <th className="py-2.5 px-3">PYQ Frequency</th>
-                    <th className="py-2.5 px-3">Textbook Match</th>
-                    <th className="py-2.5 px-3">Priority Level</th>
-                    <th className="py-2.5 px-3">Calculation Rationale</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {activeSprint.topics.map((t) => (
-                    <tr key={t.id} className="hover:bg-slate-900/40 transition-colors">
-                      <td className="py-3 px-3 font-bold text-indigo-400">#{t.priority_rank}</td>
-                      <td className="py-3 px-3 font-semibold text-slate-100">{t.name}</td>
-                      <td className="py-3 px-3">
-                        <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                          {t.observed_frequency} paper(s)
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className="text-emerald-400 font-semibold">
-                          {(t.similarity_confidence * 100).toFixed(0)}% Match
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            t.priority_level === "High"
-                              ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                              : t.priority_level === "Medium"
-                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                              : "bg-slate-800 text-slate-400"
-                          }`}
-                        >
-                          {t.priority_level} Priority
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-slate-400 text-[11px] max-w-xs truncate" title={t.calculation_notes}>
-                        {t.calculation_notes || "Priority weighted by frequency & cosine relevance."}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Section 2: Day-by-Day Interactive Schedule Timeline */}
-          <div className="p-6 rounded-3xl glass-panel space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                  <CalendarDays className="h-4 w-4 text-emerald-400" />
-                  <span>Day-by-Day Preparation Timeline</span>
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Topic Study, Speed Practice, Revision Sessions, and Full Mock-Test days.
-                </p>
-              </div>
-
-              {/* Task Filter Chips */}
-              <div className="flex flex-wrap gap-1.5">
-                {(["All", "Topic Study", "Revision", "Practice Questions", "Mock Test"] as const).map((filter) => (
-                  <button
-                    key={filter}
-                    onClick={() => setTaskFilter(filter)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                      taskFilter === filter
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-900 text-slate-400 hover:bg-slate-800"
-                    }`}
-                  >
-                    {filter}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Timeline Task Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredTasks.map((tk) => {
-                const isCompleted = tk.is_completed;
-                const taskDate = new Date(tk.scheduled_date).toLocaleDateString(undefined, {
-                  weekday: "short",
-                  month: "short",
-                  day: "numeric",
-                });
-
-                let badgeColor = "bg-indigo-500/10 text-indigo-400 border-indigo-500/20";
-                if (tk.task_type === "Revision") badgeColor = "bg-violet-500/10 text-violet-400 border-violet-500/20";
-                if (tk.task_type === "Practice Questions") badgeColor = "bg-amber-500/10 text-amber-400 border-amber-500/20";
-                if (tk.task_type === "Mock Test") badgeColor = "bg-rose-500/10 text-rose-400 border-rose-500/20";
-
-                return (
-                  <div
-                    key={tk.id}
-                    onClick={() => handleToggleTask(activeSprint.id, tk.id, isCompleted)}
-                    className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-start justify-between gap-3 ${
-                      isCompleted
-                        ? "bg-slate-900/40 border-slate-800/50 opacity-60"
-                        : "bg-slate-900/90 border-slate-800 hover:border-indigo-500/50"
-                    }`}
-                  >
-                    <div className="flex items-start space-x-3 truncate">
-                      <div className="mt-0.5 shrink-0">
-                        <CheckCircle2
-                          className={`h-5 w-5 transition-colors ${
-                            isCompleted ? "text-emerald-500" : "text-slate-600 hover:text-slate-400"
-                          }`}
-                        />
-                      </div>
-                      <div className="space-y-1 truncate">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-[10px] font-bold text-slate-500">Day {tk.day_number} &bull; {taskDate}</span>
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${badgeColor}`}>
-                            {tk.task_type}
-                          </span>
-                        </div>
-                        <h4 className={`text-xs font-bold truncate ${isCompleted ? "line-through text-slate-500" : "text-slate-100"}`}>
-                          {tk.title}
-                        </h4>
-                        {tk.description && (
-                          <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
-                            {tk.description}
-                          </p>
-                        )}
-                      </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {sprints.map((s) => {
+            const tbDoc = documents.find(
+              (d) => d.id === s.textbook_document_id
+            );
+            return (
+              <Card
+                key={s.id}
+                className="p-6 flex flex-col justify-between gap-5 hover:border-[#CBD5E1] transition-colors"
+              >
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="amber">
+                        Exam: {new Date(s.exam_date).toLocaleDateString()}
+                      </Badge>
+                      <Badge variant="default">
+                        {s.daily_study_hours} hrs/day
+                      </Badge>
                     </div>
 
-                    <div className="text-right shrink-0">
-                      <span className="text-[10px] font-medium text-slate-500 flex items-center space-x-1">
-                        <Clock className="h-3 w-3" />
-                        <span>{tk.estimated_minutes} min</span>
+                    <button
+                      type="button"
+                      onClick={() => setSprintToDelete(s)}
+                      aria-label={`Delete exam plan ${s.title}`}
+                      title="Delete exam plan"
+                      className="p-1.5 rounded-lg text-[#64748B] hover:text-[#B91C1C] hover:bg-[#FEF2F2] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-bold text-[#17212B]">
+                      <Link
+                        href={`/app/sprints/${s.id}`}
+                        className="hover:text-[#1D4ED8] transition-colors focus-visible:outline-none focus-visible:underline"
+                      >
+                        {s.title}
+                      </Link>
+                    </h2>
+                    {tbDoc && (
+                      <p className="text-xs text-[#526170] flex items-center gap-1.5 truncate">
+                        <BookOpen className="h-3.5 w-3.5 text-[#1D4ED8] shrink-0" />
+                        <span className="truncate">
+                          Textbook: {tbDoc.original_name}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-[#526170]">
+                        {s.completed_tasks_count} of {s.tasks.length} tasks
+                        completed ({s.topics.length} ranked topics)
+                      </span>
+                      <span className="font-mono-code font-semibold text-[#17212B]">
+                        {s.progress_percentage}%
                       </span>
                     </div>
+                    <div className="w-full h-2 bg-[#F1F4F8] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#1D4ED8] rounded-full"
+                        style={{ width: `${s.progress_percentage}%` }}
+                      />
+                    </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
+                </div>
+
+                <div className="pt-4 border-t border-[#E2E7ED] flex items-center justify-between gap-3">
+                  <span className="text-xs text-[#64748B]">
+                    {s.total_days} scheduled days
+                  </span>
+                  <Link
+                    href={`/app/sprints/${s.id}`}
+                    className="inline-flex items-center justify-center h-9 px-4 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs font-medium transition-colors gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] focus-visible:ring-offset-2"
+                  >
+                    <span>Open schedule</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
 
-      {/* Create Sprint Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-slate-700 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-6">
-            <div className="space-y-1">
-              <h3 className="text-base font-bold text-white">Create Exam Preparation Sprint</h3>
-              <p className="text-xs text-slate-400">
-                Aligns textbook syllabus with previous question papers to build your prioritized study calendar.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              {/* Sprint Title */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Sprint Title</label>
-                <input
-                  type="text"
-                  value={sprintTitle}
-                  onChange={(e) => setSprintTitle(e.target.value)}
-                  placeholder="e.g. Midterm Algorithms Prep"
-                  className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              {/* Textbook Select */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Textbook / Study Notes (Required)</label>
-                <select
-                  value={textbookId}
-                  onChange={(e) => setTextbookId(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="">Select an uploaded textbook</option>
-                  {documents.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.original_name} ({d.file_type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* PYQ Select (Optional) */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Previous Year Question Paper (PYQ - Optional)</label>
-                <select
-                  value={pyqId}
-                  onChange={(e) => setPyqId(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="">None (pure textbook curriculum mode)</option>
-                  {documents.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.original_name} ({d.file_type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Exam Date */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Target Exam Date</label>
-                <input
-                  type="date"
-                  value={examDate}
-                  onChange={(e) => setExamDate(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              {/* Daily Hours */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-slate-300">Daily Study Hours</span>
-                  <span className="text-indigo-400 font-bold">{dailyHours} hours/day</span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="8"
-                  step="0.5"
-                  value={dailyHours}
-                  onChange={(e) => setDailyHours(parseFloat(e.target.value))}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
-
-              {errorMsg && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
-                  {errorMsg}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end space-x-3 pt-2">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-slate-400"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateSprint}
+      {/* Create Exam Plan Dialog */}
+      <Dialog
+        open={showCreateModal}
+        onClose={() => !creating && setShowCreateModal(false)}
+        title="Create exam plan"
+        description="Rank syllabus topics and build a daily study checklist up to your exam date."
+        maxWidth="md"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateModal(false)}
+              disabled={creating}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              form="create-sprint-form"
+              disabled={!textbookId}
+              loading={creating}
+            >
+              {creating ? "Building schedule..." : "Create exam plan"}
+            </Button>
+          </>
+        }
+      >
+        {documents.length === 0 ? (
+          <div className="space-y-4 py-2 text-center">
+            <p className="text-sm text-[#526170]">
+              Please upload a textbook or notes PDF before creating an exam plan.
+            </p>
+            <Link
+              href="/app/documents"
+              className="inline-flex items-center justify-center h-10 px-4 rounded-lg bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-sm font-medium gap-2"
+            >
+              <Upload className="h-4 w-4" />
+              <span>Go to Documents</span>
+            </Link>
+          </div>
+        ) : (
+          <form
+            id="create-sprint-form"
+            onSubmit={handleCreateSprintSubmit}
+            className="space-y-4"
+          >
+            <FormField
+              label="Plan title"
+              htmlFor="sprint-title-input"
+              required
+            >
+              <Input
+                id="sprint-title-input"
+                value={sprintTitle}
+                onChange={(e) => setSprintTitle(e.target.value)}
+                placeholder="e.g. Algorithms Midterm Plan"
+                required
                 disabled={creating}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-indigo-600/30 flex items-center space-x-2"
+              />
+            </FormField>
+
+            <FormField
+              label="Textbook or study notes PDF"
+              htmlFor="sprint-textbook-select"
+              hint="Primary syllabus source used to match and schedule topics."
+              required
+            >
+              <Select
+                id="sprint-textbook-select"
+                value={textbookId}
+                onChange={(e) => setTextbookId(e.target.value)}
+                disabled={creating}
               >
-                {creating ? (
-                  <>
-                    <span className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Analyzing Frequency & Ranking...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-3.5 w-3.5" />
-                    <span>Generate Sprint Plan</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                <option value="">Select an uploaded document</option>
+                {documents.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.original_name} ({d.file_type})
+                  </option>
+                ))}
+              </Select>
+            </FormField>
 
-      {/* Regeneration Modal */}
-      {showRegenModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-slate-700 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-6">
-            <div className="space-y-1">
-              <h3 className="text-base font-bold text-white">Regenerate Study Schedule</h3>
-              <p className="text-xs text-slate-400">
-                Recalibrate future study days while strictly preserving all completed tasks.
-              </p>
-            </div>
+            <FormField
+              label="Past question paper PDF (optional)"
+              htmlFor="sprint-pyq-select"
+              hint="If provided, observed question frequency is calculated from this paper."
+            >
+              <Select
+                id="sprint-pyq-select"
+                value={pyqId}
+                onChange={(e) => setPyqId(e.target.value)}
+                disabled={creating}
+              >
+                <option value="">None — rank from textbook structure only</option>
+                {documents.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.original_name} ({d.file_type})
+                  </option>
+                ))}
+              </Select>
+            </FormField>
 
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Adjusted Exam Date</label>
-                <input
-                  type="date"
-                  value={regenDate}
-                  onChange={(e) => setRegenDate(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
+            <FormField
+              label="Target exam date"
+              htmlFor="sprint-exam-date"
+              required
+            >
+              <Input
+                id="sprint-exam-date"
+                type="date"
+                value={examDate}
+                onChange={(e) => setExamDate(e.target.value)}
+                required
+                disabled={creating}
+              />
+            </FormField>
+
+            <FormField
+              label={`Daily study hours: ${dailyHours} hours/day`}
+              htmlFor="sprint-daily-hours"
+            >
+              <input
+                id="sprint-daily-hours"
+                type="range"
+                min={1}
+                max={8}
+                step={0.5}
+                value={dailyHours}
+                onChange={(e) => setDailyHours(parseFloat(e.target.value))}
+                disabled={creating}
+                className="w-full accent-[#1D4ED8] cursor-pointer"
+              />
+              <div className="flex justify-between text-[11px] text-[#64748B] font-mono-code">
+                <span>1 hr/day</span>
+                <span>4 hrs/day</span>
+                <span>8 hrs/day</span>
               </div>
+            </FormField>
 
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-slate-300">Adjusted Daily Study Hours</span>
-                  <span className="text-indigo-400 font-bold">{regenHours} hours/day</span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="8"
-                  step="0.5"
-                  value={regenHours}
-                  onChange={(e) => setRegenHours(parseFloat(e.target.value))}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
-            </div>
+            {createError && (
+              <InlineBanner variant="error">{createError}</InlineBanner>
+            )}
+          </form>
+        )}
+      </Dialog>
 
-            <div className="flex items-center justify-end space-x-3 pt-2">
-              <button
-                onClick={() => setShowRegenModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-slate-400"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRegenerateSprint}
-                disabled={regenerating}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-indigo-600/30 flex items-center space-x-2"
-              >
-                {regenerating ? (
-                  <>
-                    <span className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Recalibrating Plan...</span>
-                  </>
-                ) : (
-                  <span>Recalibrate Schedule</span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={Boolean(sprintToDelete)}
+        onClose={() => !deleting && setSprintToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Delete exam plan?"
+        description={
+          sprintToDelete
+            ? `Are you sure you want to delete "${sprintToDelete.title}"? This removes the topic rankings and task checklist.`
+            : ""
+        }
+        confirmLabel="Delete exam plan"
+        variant="danger"
+        loading={deleting}
+      />
     </div>
   );
 };

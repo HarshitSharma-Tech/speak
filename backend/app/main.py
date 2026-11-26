@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.session import engine, Base
 import app.models  # Ensure all models are registered
-from app.routers import documents, courses, quizzes, sprints, interviews
+from app.routers import documents, courses, quizzes, sprints, interviews, auth, practice
 
 # Configure logging
 logging.basicConfig(
@@ -116,3 +116,5 @@ app.include_router(courses.router, prefix=api_prefix)
 app.include_router(quizzes.router, prefix=api_prefix)
 app.include_router(sprints.router, prefix=api_prefix)
 app.include_router(interviews.router, prefix=api_prefix)
+app.include_router(auth.router, prefix=api_prefix)
+app.include_router(practice.router, prefix=api_prefix)

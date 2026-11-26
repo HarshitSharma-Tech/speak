@@ -1,6 +1,98 @@
+import base64
 import hashlib
+import hmac
+import json
+import os
 import re
-from typing import Tuple
+import secrets
+import time
+from typing import Optional, Tuple
+from app.core.config import settings
+
+_CACHED_AUTH_SECRET: Optional[bytes] = None
+_AUTH_SECRET_PATH = "./.auth_secret"
+
+
+def get_auth_secret() -> bytes:
+    """Return signing secret from config or persistent local ./.auth_secret file."""
+    global _CACHED_AUTH_SECRET
+    if settings.AUTH_SECRET_KEY:
+        return settings.AUTH_SECRET_KEY.encode("utf-8")
+    if _CACHED_AUTH_SECRET is not None:
+        return _CACHED_AUTH_SECRET
+
+    if os.path.exists(_AUTH_SECRET_PATH):
+        with open(_AUTH_SECRET_PATH, "r", encoding="utf-8") as f:
+            secret_text = f.read().strip()
+        if secret_text:
+            _CACHED_AUTH_SECRET = secret_text.encode("utf-8")
+            return _CACHED_AUTH_SECRET
+
+    generated = secrets.token_hex(32)
+    with open(_AUTH_SECRET_PATH, "w", encoding="utf-8") as f:
+        f.write(generated)
+    _CACHED_AUTH_SECRET = generated.encode("utf-8")
+    return _CACHED_AUTH_SECRET
+
+
+def hash_password(password: str) -> str:
+    """Hash a password using PBKDF2-HMAC-SHA256 with a random 16-byte hex salt."""
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 200_000).hex()
+    return f"pbkdf2_sha256$200000${salt}${dk}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Verify a password against a stored pbkdf2_sha256 hash in constant time."""
+    try:
+        algo, iter_str, salt, expected_hex = stored.split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        iterations = int(iter_str)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations).hex()
+        return hmac.compare_digest(dk, expected_hex)
+    except Exception:
+        return False
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(segment: str) -> bytes:
+    padding = "=" * (-len(segment) % 4)
+    return base64.urlsafe_b64decode(segment + padding)
+
+
+def create_access_token(user_id: str) -> str:
+    """Create a signed compact bearer token with expiration."""
+    payload = {
+        "sub": user_id,
+        "exp": int(time.time()) + settings.AUTH_TOKEN_TTL_HOURS * 3600,
+    }
+    body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = _b64url_encode(hmac.new(get_auth_secret(), body.encode("ascii"), hashlib.sha256).digest())
+    return f"{body}.{sig}"
+
+
+def decode_access_token(token: str) -> Optional[str]:
+    """Verify signature and expiration of a bearer token and return user_id."""
+    try:
+        if not token or "." not in token:
+            return None
+        body, sig = token.split(".", 1)
+        expected_sig = _b64url_encode(
+            hmac.new(get_auth_secret(), body.encode("ascii"), hashlib.sha256).digest()
+        )
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        payload = json.loads(_b64url_decode(body).decode("utf-8"))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            return None
+        sub = payload.get("sub")
+        return str(sub) if sub else None
+    except Exception:
+        return None
 
 
 def sanitize_filename(filename: str) -> str:

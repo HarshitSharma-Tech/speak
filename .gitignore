@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 backend/.env
+backend/.auth_secret
 
 # Python / Backend
 __pycache__/

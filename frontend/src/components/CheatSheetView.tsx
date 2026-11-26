@@ -1,8 +1,15 @@
 "use client";
 
 import React from "react";
-import { BookOpen, Sparkles, FileText, CheckCircle2, Sigma, ArrowLeft } from "lucide-react";
+import {
+  BookOpen,
+  FileText,
+  CheckCircle2,
+  Sigma,
+  ArrowLeft,
+} from "lucide-react";
 import { CheatSheetItem } from "@/lib/api";
+import { Card, Button, Badge } from "@/components/ui";
 
 interface CheatSheetViewProps {
   cheatSheet: CheatSheetItem;
@@ -18,104 +25,132 @@ export const CheatSheetView: React.FC<CheatSheetViewProps> = ({
   onBack,
 }) => {
   return (
-    <div className="space-y-8 max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="p-6 rounded-3xl glass-panel flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-indigo-500/20">
-        <div className="space-y-1">
-          <div className="flex items-center space-x-2">
-            <span className="px-2.5 py-0.5 rounded-md bg-amber-500/20 text-amber-400 text-xs font-bold border border-amber-500/30 flex items-center space-x-1">
-              <Sparkles className="h-3 w-3" />
-              <span>High-Yield Revision Deck</span>
-            </span>
-            <span className="text-xs text-slate-400">{courseTitle}</span>
+    <div className="space-y-6">
+      {/* Cheat Sheet Header Card */}
+      <Card className="p-6 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div className="space-y-2 max-w-2xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="brand">Revision cheat sheet</Badge>
+            <span className="text-xs text-[#526170]">{courseTitle}</span>
           </div>
-          <h2 className="text-xl font-extrabold text-white tracking-tight">{cheatSheet.title}</h2>
+          <h2 className="text-xl font-bold text-[#17212B] tracking-tight">
+            {cheatSheet.title}
+          </h2>
           {cheatSheet.summary && (
-            <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">{cheatSheet.summary}</p>
+            <p className="text-sm text-[#526170] leading-relaxed">
+              {cheatSheet.summary}
+            </p>
           )}
         </div>
 
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={onBack}
-          className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition-colors self-start sm:self-auto shrink-0"
+          icon={<ArrowLeft className="h-3.5 w-3.5" />}
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          <span>Back to Course</span>
-        </button>
-      </div>
+          Back to module notes
+        </Button>
+      </Card>
 
-      {/* Grid of Cheat Sheet Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Definitions & Formulas Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         {/* Core Definitions */}
-        <div className="p-6 rounded-3xl glass-panel space-y-4 border border-indigo-500/20">
-          <div className="flex items-center space-x-2 text-indigo-400 font-bold text-sm">
-            <BookOpen className="h-4 w-4" />
-            <span>Essential Definitions & Axioms</span>
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-[#17212B] pb-3 border-b border-[#E2E7ED]">
+            <BookOpen className="h-4 w-4 text-[#1D4ED8]" />
+            <h3>Key Definitions & Concepts</h3>
           </div>
-          <div className="space-y-3">
-            {cheatSheet.key_definitions.map((def, idx) => (
-              <div key={idx} className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800/80 space-y-1">
-                <span className="h-5 w-5 rounded-md bg-indigo-500/10 text-indigo-400 text-[10px] font-bold inline-flex items-center justify-center mr-2">
-                  #{idx + 1}
-                </span>
-                <span className="text-xs text-slate-200 leading-relaxed font-sans">{def}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+          {cheatSheet.key_definitions.length === 0 ? (
+            <p className="text-xs text-[#526170]">No definitions listed.</p>
+          ) : (
+            <ol className="space-y-3">
+              {cheatSheet.key_definitions.map((def, idx) => (
+                <li
+                  key={idx}
+                  className="p-3.5 rounded-lg bg-[#F7F8FA] border border-[#E2E7ED] flex items-start gap-3 text-sm text-[#17212B]"
+                >
+                  <span className="h-5 w-5 rounded bg-[#EFF6FF] border border-[#BFDBFE] text-[#1D4ED8] font-mono-code text-xs font-semibold flex items-center justify-center shrink-0 mt-0.5">
+                    {idx + 1}
+                  </span>
+                  <span className="leading-relaxed">{def}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
 
-        {/* Formulas & Core Relationships */}
-        <div className="p-6 rounded-3xl glass-panel space-y-4 border border-violet-500/20">
-          <div className="flex items-center space-x-2 text-violet-400 font-bold text-sm">
-            <Sigma className="h-4 w-4" />
-            <span>Important Formulas & Principles</span>
+        {/* Important Formulas & Relationships */}
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-[#17212B] pb-3 border-b border-[#E2E7ED]">
+            <Sigma className="h-4 w-4 text-[#B45309]" />
+            <h3>Formulas & Core Relationships</h3>
           </div>
-          <div className="space-y-3">
-            {cheatSheet.important_formulas.map((formula, idx) => (
-              <div key={idx} className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800/80 space-y-1">
-                <span className="h-5 w-5 rounded-md bg-violet-500/10 text-violet-400 text-[10px] font-bold inline-flex items-center justify-center mr-2">
-                  #{idx + 1}
-                </span>
-                <span className="text-xs text-slate-200 leading-relaxed font-sans">{formula}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+          {cheatSheet.important_formulas.length === 0 ? (
+            <p className="text-xs text-[#526170]">No formulas listed.</p>
+          ) : (
+            <ol className="space-y-3">
+              {cheatSheet.important_formulas.map((formula, idx) => (
+                <li
+                  key={idx}
+                  className="p-3.5 rounded-lg bg-[#FFFBEB]/60 border border-[#FDE68A] flex items-start gap-3 text-sm text-[#17212B]"
+                >
+                  <span className="h-5 w-5 rounded bg-[#FFFBEB] border border-[#FDE68A] text-[#B45309] font-mono-code text-xs font-semibold flex items-center justify-center shrink-0 mt-0.5">
+                    {idx + 1}
+                  </span>
+                  <span className="font-mono-code text-xs sm:text-sm leading-relaxed">
+                    {formula}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
       </div>
 
-      {/* High-Yield Revision Points Card */}
-      <div className="p-6 rounded-3xl glass-panel space-y-4 border border-emerald-500/20">
-        <div className="flex items-center space-x-2 text-emerald-400 font-bold text-sm">
-          <CheckCircle2 className="h-4 w-4" />
-          <span>High-Yield Exam Takeaways</span>
+      {/* High-Yield Revision Points */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-bold text-[#17212B] pb-3 border-b border-[#E2E7ED]">
+          <CheckCircle2 className="h-4 w-4 text-[#15803D]" />
+          <h3>High-Yield Revision Takeaways</h3>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {cheatSheet.high_yield_revision_points.map((point, idx) => (
-            <div
+            <li
               key={idx}
-              className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800/80 flex items-start space-x-2.5 text-xs text-slate-200"
+              className="p-3.5 rounded-lg bg-[#F7F8FA] border border-[#E2E7ED] flex items-start gap-2.5 text-sm text-[#17212B]"
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+              <span className="h-2 w-2 rounded-full bg-[#1D4ED8] mt-2 shrink-0" />
               <span className="leading-relaxed">{point}</span>
-            </div>
+            </li>
           ))}
-        </div>
-      </div>
+        </ul>
+      </Card>
 
-      {/* Source Grounding Footnote */}
+      {/* Source Grounding Citations */}
       {cheatSheet.source_chunk_ids.length > 0 && (
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center space-x-2">
-            <FileText className="h-4 w-4 text-indigo-400" />
-            <span>Grounded in {cheatSheet.source_chunk_ids.length} supporting textbook chunks</span>
+        <Card className="p-4 bg-[#F7F8FA] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-[#526170]">
+            <FileText className="h-4 w-4 text-[#1D4ED8] shrink-0" />
+            <span>
+              Compiled from {cheatSheet.source_chunk_ids.length} source textbook{" "}
+              {cheatSheet.source_chunk_ids.length === 1 ? "section" : "sections"}.
+            </span>
           </div>
-          <button
-            onClick={() => onOpenCitation(cheatSheet.source_chunk_ids[0])}
-            className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 underline"
-          >
-            Verify Citations
-          </button>
-        </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {cheatSheet.source_chunk_ids.slice(0, 4).map((cid, index) => (
+              <Button
+                key={cid}
+                variant="outline"
+                size="sm"
+                onClick={() => onOpenCitation(cid)}
+                icon={<BookOpen className="h-3.5 w-3.5 text-[#1D4ED8]" />}
+              >
+                Source #{index + 1}
+              </Button>
+            ))}
+          </div>
+        </Card>
       )}
     </div>
   );

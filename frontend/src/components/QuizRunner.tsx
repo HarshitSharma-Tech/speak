@@ -2,17 +2,16 @@
 
 import React, { useState } from "react";
 import {
-  HelpCircle,
   CheckCircle2,
   XCircle,
   BookOpen,
   ArrowRight,
   RotateCcw,
   Award,
-  Sparkles,
-  ShieldCheck
+  ArrowLeft,
 } from "lucide-react";
 import { QuizItem, QuizResult, api } from "@/lib/api";
+import { Card, Button, Badge, InlineBanner } from "@/components/ui";
 
 interface QuizRunnerProps {
   quiz: QuizItem;
@@ -24,161 +23,266 @@ interface QuizRunnerProps {
 
 export const QuizRunner: React.FC<QuizRunnerProps> = ({
   quiz,
-  courseId,
   onOpenSourceCitation,
   onRetake,
   onClose,
 }) => {
-  // Store selected answers per question index: { [questionId]: optionIndex }
-  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({});
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>(
+    {}
+  );
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
 
   const handleSelectOption = (questionId: string, optionIndex: number) => {
-    if (quizResult) return; // Prevent change after submission
+    if (quizResult || submitting) return;
     setSelectedAnswers((prev) => ({
       ...prev,
       [questionId]: optionIndex,
     }));
   };
 
-  const isAllAnswered = quiz.questions.every((q) => selectedAnswers[q.id] !== undefined);
+  const handleOptionKeyDown = (
+    e: React.KeyboardEvent,
+    questionId: string,
+    currentOptionIdx: number,
+    totalOptions: number
+  ) => {
+    if (quizResult || submitting) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const next = (currentOptionIdx + 1) % totalOptions;
+      handleSelectOption(questionId, next);
+      const nextEl = document.getElementById(`quiz-opt-${questionId}-${next}`);
+      nextEl?.focus();
+    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      const prev = (currentOptionIdx - 1 + totalOptions) % totalOptions;
+      handleSelectOption(questionId, prev);
+      const prevEl = document.getElementById(`quiz-opt-${questionId}-${prev}`);
+      prevEl?.focus();
+    }
+  };
+
+  const answeredCount = Object.keys(selectedAnswers).length;
+  const totalQuestions = quiz.questions.length;
+  const isAllAnswered =
+    totalQuestions > 0 &&
+    quiz.questions.every((q) => selectedAnswers[q.id] !== undefined);
 
   const handleSubmit = async () => {
-    if (!isAllAnswered) return;
+    if (!isAllAnswered || submitting) return;
 
     setSubmitting(true);
+    setSubmitError(null);
     try {
-      const payload = Object.entries(selectedAnswers).map(([question_id, selected_option_index]) => ({
-        question_id,
-        selected_option_index,
-      }));
+      const payload = Object.entries(selectedAnswers).map(
+        ([question_id, selected_option_index]) => ({
+          question_id,
+          selected_option_index,
+        })
+      );
 
       const result = await api.submitQuiz(quiz.id, payload);
       setQuizResult(result);
-    } catch (err: any) {
-      alert("Error evaluating quiz: " + err.message);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err: unknown) {
+      setSubmitError(
+        err instanceof Error
+          ? err.message
+          : "Could not evaluate quiz answers. Please try again."
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="space-y-8 max-w-4xl mx-auto">
+    <div className="space-y-6 max-w-4xl mx-auto">
       {/* Quiz Header */}
-      <div className="p-6 rounded-3xl glass-panel flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-indigo-500/20">
-        <div className="space-y-1">
-          <div className="flex items-center space-x-2">
-            <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-400 text-xs font-bold border border-indigo-500/30">
-              5 Grounded Questions
+      <Card className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="brand">{totalQuestions} questions</Badge>
+            <span className="text-xs text-[#526170]">
+              Every question includes a textbook source citation
             </span>
-            <span className="text-xs text-slate-400">Instant Evaluation & Evidence Citations</span>
           </div>
-          <h2 className="text-xl font-extrabold text-white tracking-tight">{quiz.title}</h2>
+          <h2 className="text-xl font-bold text-[#17212B] tracking-tight">
+            {quiz.title}
+          </h2>
         </div>
 
-        <div className="flex items-center space-x-2.5 shrink-0">
-          <button
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
             onClick={onRetake}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+            icon={<RotateCcw className="h-3.5 w-3.5" />}
           >
-            <RotateCcw className="h-3.5 w-3.5" />
-            <span>Regenerate Quiz</span>
-          </button>
-          <button
+            New quiz set
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={onClose}
-            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 text-xs font-semibold transition-colors border border-slate-800"
+            icon={<ArrowLeft className="h-3.5 w-3.5" />}
           >
-            Back to Module
-          </button>
+            Back to module
+          </Button>
         </div>
-      </div>
+      </Card>
 
-      {/* Result Score Banner */}
+      {/* Graded Result Summary */}
       {quizResult && (
-        <div className="p-8 rounded-3xl bg-gradient-to-r from-indigo-950 via-slate-900 to-slate-900 border border-indigo-500/30 space-y-4 shadow-xl">
+        <Card className="p-6 bg-[#EFF6FF] border-[#BFDBFE] space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center space-x-4">
-              <div className="h-14 w-14 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
-                <Award className="h-8 w-8 text-indigo-400" />
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-[#1D4ED8] text-white flex items-center justify-center shrink-0">
+                <Award className="h-6 w-6" />
               </div>
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">Quiz Performance</span>
-                <h3 className="text-2xl font-black text-white">
-                  Score: {quizResult.score} / {quizResult.total_questions} ({quizResult.percentage}%)
+              <div className="space-y-0.5">
+                <span className="text-xs font-semibold text-[#1D4ED8]">
+                  Quiz graded
+                </span>
+                <h3 className="text-2xl font-bold text-[#17212B]">
+                  {quizResult.score} of {quizResult.total_questions} correct (
+                  {quizResult.percentage}%)
                 </h3>
+                <p className="text-xs text-[#526170]">
+                  Review the explanations and textbook source citations for each question below.
+                </p>
               </div>
             </div>
-            <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 space-y-1">
-              <div className="flex items-center space-x-1.5 text-emerald-400 font-semibold">
-                <ShieldCheck className="h-4 w-4" />
-                <span>100% Grounded Source Evidence</span>
-              </div>
-              <p className="text-[11px] text-slate-400">Review detailed explanations and citations below.</p>
-            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setQuizResult(null);
+                setSelectedAnswers({});
+              }}
+              icon={<RotateCcw className="h-3.5 w-3.5" />}
+            >
+              Retry this quiz
+            </Button>
           </div>
-        </div>
+        </Card>
+      )}
+
+      {submitError && (
+        <InlineBanner
+          variant="error"
+          title="Could not grade quiz"
+          onDismiss={() => setSubmitError(null)}
+        >
+          {submitError}
+        </InlineBanner>
       )}
 
       {/* Questions List */}
-      <div className="space-y-6">
+      <div className="space-y-5">
         {quiz.questions.map((q, qIndex) => {
-          const feedback = quizResult?.feedback?.find((f) => f.question_id === q.id);
+          const feedback = quizResult?.feedback?.find(
+            (f) => f.question_id === q.id
+          );
           const selectedOption = selectedAnswers[q.id];
+          const questionTitleId = `question-title-${q.id}`;
 
           return (
-            <div
+            <Card
               key={q.id}
-              className={`p-6 rounded-3xl glass-panel space-y-4 transition-all ${
+              className={`p-6 space-y-4 ${
                 feedback
                   ? feedback.is_correct
-                    ? "border-emerald-500/40 bg-emerald-950/10"
-                    : "border-rose-500/40 bg-rose-950/10"
-                  : "border-slate-800"
+                    ? "border-[#BBF7D0]"
+                    : "border-[#FECACA]"
+                  : ""
               }`}
             >
               {/* Question Header */}
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start space-x-3">
-                  <span className="h-7 w-7 rounded-xl bg-indigo-500/20 text-indigo-400 font-bold text-xs flex items-center justify-center shrink-0 border border-indigo-500/30">
-                    Q{qIndex + 1}
-                  </span>
-                  <h3 className="text-base font-semibold text-slate-100 leading-snug">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono-code font-semibold text-[#1D4ED8] px-2 py-0.5 rounded bg-[#EFF6FF] border border-[#BFDBFE]">
+                      Question {qIndex + 1} of {totalQuestions}
+                    </span>
+                    {feedback && (
+                      <Badge
+                        variant={feedback.is_correct ? "success" : "error"}
+                      >
+                        {feedback.is_correct ? (
+                          <>
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>Correct</span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="h-3.5 w-3.5" />
+                            <span>Incorrect</span>
+                          </>
+                        )}
+                      </Badge>
+                    )}
+                  </div>
+                  <h3
+                    id={questionTitleId}
+                    className="text-base font-bold text-[#17212B] leading-snug pt-0.5"
+                  >
                     {q.question_text}
                   </h3>
                 </div>
 
-                {/* Grounded Citation Button */}
-                <button
+                {/* Source Citation Trigger */}
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => onOpenSourceCitation(q.source_chunk_id)}
-                  className="px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 text-xs font-medium border border-indigo-500/20 flex items-center space-x-1 shrink-0 transition-colors"
-                  title="View verbatim textbook source evidence"
+                  icon={<BookOpen className="h-3.5 w-3.5 text-[#1D4ED8]" />}
+                  title="Inspect verbatim textbook passage"
                 >
-                  <BookOpen className="h-3.5 w-3.5" />
-                  <span>Source Citation</span>
-                </button>
+                  View source
+                </Button>
               </div>
 
-              {/* 4 Answer Options */}
-              <div className="grid grid-cols-1 gap-2.5 pt-2">
+              {/* 4 Answer Options with Keyboard Support */}
+              <div
+                role="radiogroup"
+                aria-labelledby={questionTitleId}
+                className="space-y-2.5 pt-1"
+              >
                 {q.options.map((optionText, optIndex) => {
                   const isSelected = selectedOption === optIndex;
                   const isCorrect = feedback?.correct_option_index === optIndex;
-                  const isWrongSelected = feedback && isSelected && !feedback.is_correct;
+                  const isWrongSelected =
+                    Boolean(feedback) && isSelected && !feedback?.is_correct;
 
-                  let cardStyle = "bg-slate-900/80 border-slate-800 hover:border-slate-700 text-slate-300";
+                  let optionClasses =
+                    "bg-white border-[#E2E7ED] hover:bg-[#F7F8FA] text-[#17212B]";
+                  let badgeClasses =
+                    "bg-[#F1F4F8] border-[#E2E7ED] text-[#526170]";
 
-                  if (isSelected && !quizResult) {
-                    cardStyle = "bg-indigo-600/20 border-indigo-500 text-white shadow-sm";
+                  if (isSelected && !feedback) {
+                    optionClasses =
+                      "bg-[#EFF6FF] border-[#1D4ED8] ring-1 ring-[#1D4ED8] text-[#17212B] font-medium";
+                    badgeClasses =
+                      "bg-[#1D4ED8] border-[#1D4ED8] text-white";
                   }
 
                   if (feedback) {
                     if (isCorrect) {
-                      cardStyle = "bg-emerald-500/20 border-emerald-500 text-emerald-200 font-medium";
+                      optionClasses =
+                        "bg-[#F0FDF4] border-[#15803D] text-[#15803D] font-medium";
+                      badgeClasses =
+                        "bg-[#15803D] border-[#15803D] text-white";
                     } else if (isWrongSelected) {
-                      cardStyle = "bg-rose-500/20 border-rose-500 text-rose-200 line-through";
+                      optionClasses =
+                        "bg-[#FEF2F2] border-[#B91C1C] text-[#B91C1C]";
+                      badgeClasses =
+                        "bg-[#B91C1C] border-[#B91C1C] text-white";
                     } else {
-                      cardStyle = "bg-slate-900/40 border-slate-800/60 text-slate-500";
+                      optionClasses =
+                        "bg-[#F7F8FA] border-[#E2E7ED] text-[#64748B]";
                     }
                   }
 
@@ -187,83 +291,129 @@ export const QuizRunner: React.FC<QuizRunnerProps> = ({
                   return (
                     <button
                       key={optIndex}
+                      id={`quiz-opt-${q.id}-${optIndex}`}
                       type="button"
-                      disabled={!!quizResult}
+                      role="radio"
+                      aria-checked={isSelected}
+                      disabled={Boolean(quizResult) || submitting}
                       onClick={() => handleSelectOption(q.id, optIndex)}
-                      className={`w-full p-4 rounded-2xl border text-left text-sm flex items-center justify-between transition-all ${cardStyle}`}
+                      onKeyDown={(e) =>
+                        handleOptionKeyDown(
+                          e,
+                          q.id,
+                          optIndex,
+                          q.options.length
+                        )
+                      }
+                      className={`w-full p-3.5 rounded-xl border text-left text-sm flex items-center justify-between gap-3 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] disabled:cursor-default ${optionClasses}`}
                     >
-                      <div className="flex items-center space-x-3.5">
-                        <span className="h-6 w-6 rounded-lg bg-slate-800 font-bold text-xs flex items-center justify-center shrink-0 border border-slate-700">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <span
+                          className={`h-6 w-6 rounded-md border font-mono-code font-semibold text-xs flex items-center justify-center shrink-0 mt-0.5 ${badgeClasses}`}
+                        >
                           {letter}
                         </span>
                         <span className="leading-relaxed">{optionText}</span>
                       </div>
 
                       {feedback && isCorrect && (
-                        <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#15803D] shrink-0">
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>Correct answer</span>
+                        </span>
                       )}
                       {feedback && isWrongSelected && (
-                        <XCircle className="h-5 w-5 text-rose-400 shrink-0" />
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#B91C1C] shrink-0">
+                          <XCircle className="h-4 w-4" />
+                          <span>Your selection</span>
+                        </span>
                       )}
                     </button>
                   );
                 })}
               </div>
 
-              {/* Instant Feedback & Explanation Box */}
+              {/* Explanation & Grounded Excerpt after grading */}
               {feedback && (
-                <div className="mt-4 p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2 text-xs">
-                  <div className="flex items-center space-x-2 font-bold">
-                    {feedback.is_correct ? (
-                      <span className="text-emerald-400 flex items-center space-x-1">
-                        <CheckCircle2 className="h-4 w-4" />
-                        <span>Correct Answer</span>
-                      </span>
-                    ) : (
-                      <span className="text-rose-400 flex items-center space-x-1">
-                        <XCircle className="h-4 w-4" />
-                        <span>Incorrect Choice</span>
-                      </span>
-                    )}
+                <div className="mt-3 p-4 rounded-xl bg-[#F7F8FA] border border-[#E2E7ED] space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`font-semibold flex items-center gap-1.5 ${
+                        feedback.is_correct
+                          ? "text-[#15803D]"
+                          : "text-[#B91C1C]"
+                      }`}
+                    >
+                      {feedback.is_correct ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 shrink-0" />
+                          <span>Correct — Explanation</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-4 w-4 shrink-0" />
+                          <span>
+                            Incorrect — Option{" "}
+                            {String.fromCharCode(
+                              65 + feedback.correct_option_index
+                            )}{" "}
+                            is correct
+                          </span>
+                        </>
+                      )}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenSourceCitation(feedback.source_chunk_id)
+                      }
+                      className="text-[#1D4ED8] font-semibold hover:underline cursor-pointer"
+                    >
+                      Inspect page citation &rarr;
+                    </button>
                   </div>
-                  <p className="text-slate-300 leading-relaxed font-sans">{feedback.explanation}</p>
+
+                  <p className="text-sm text-[#17212B] leading-relaxed">
+                    {feedback.explanation}
+                  </p>
+
                   {feedback.source_text_snippet && (
-                    <div className="pt-2 text-[11px] text-slate-400 border-t border-slate-800/60 flex items-start space-x-2">
-                      <span className="font-semibold text-indigo-400 shrink-0">Grounded Text:</span>
-                      <span className="italic">&ldquo;{feedback.source_text_snippet}&rdquo;</span>
-                    </div>
+                    <blockquote className="p-3 rounded-lg bg-white border border-[#E2E7ED] border-l-4 border-l-[#1D4ED8] text-[#526170] italic leading-relaxed">
+                      &ldquo;{feedback.source_text_snippet}&rdquo;
+                    </blockquote>
                   )}
                 </div>
               )}
-            </div>
+            </Card>
           );
         })}
       </div>
 
-      {/* Submission Footer */}
+      {/* Sticky Submission Footer */}
       {!quizResult && (
-        <div className="sticky bottom-6 p-4 rounded-2xl glass-panel flex items-center justify-between shadow-2xl border border-indigo-500/30">
-          <span className="text-xs text-slate-300">
-            {Object.keys(selectedAnswers).length} of {quiz.questions.length} questions answered
-          </span>
-          <button
+        <Card className="sticky bottom-4 p-4 shadow-md border-[#CBD5E1] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white/95 backdrop-blur-xs">
+          <div className="space-y-0.5">
+            <span className="text-sm font-semibold text-[#17212B] block">
+              {answeredCount} of {totalQuestions} questions answered
+            </span>
+            <span className="text-xs text-[#526170]">
+              {isAllAnswered
+                ? "All questions answered. Submit to view your score and source explanations."
+                : "Select one option for each question before submitting."}
+            </span>
+          </div>
+
+          <Button
+            variant="primary"
             onClick={handleSubmit}
-            disabled={!isAllAnswered || submitting}
-            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 flex items-center space-x-2 transition-all"
+            disabled={!isAllAnswered}
+            loading={submitting}
+            icon={<ArrowRight className="h-4 w-4" />}
           >
-            {submitting ? (
-              <>
-                <span className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Grading Answers...</span>
-              </>
-            ) : (
-              <>
-                <span>Submit Quiz for Instant Evaluation</span>
-                <ArrowRight className="h-4 w-4" />
-              </>
-            )}
-          </button>
-        </div>
+            {submitting ? "Grading answers..." : "Submit quiz"}
+          </Button>
+        </Card>
       )}
     </div>
   );

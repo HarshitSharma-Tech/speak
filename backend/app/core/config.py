@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     
     GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY", None)
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+    # Auth
+    AUTH_SECRET_KEY: str | None = os.getenv("AUTH_SECRET_KEY", None)
+    AUTH_TOKEN_TTL_HOURS: int = 168
     
     # Upload limits
     MAX_UPLOAD_SIZE_MB: int = 50

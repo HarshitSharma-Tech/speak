@@ -1,7 +1,7 @@
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -15,7 +15,7 @@ from app.schemas.interview import (
     InterviewAnswerEvaluationResponse,
     InterviewReportResponse
 )
-from app.services.interview_service import InterviewService
+from app.services.interview_service import InterviewService, analyze_speech_and_knowledge_gaps
 
 router = APIRouter(prefix="/interviews", tags=["Mock Mentor"])
 
@@ -25,6 +25,54 @@ def _ideal_str(value) -> str:
     if isinstance(value, (list, tuple)):
         return "; ".join(str(v) for v in value)
     return "" if value is None else str(value)
+
+
+def _get_past_session_mistakes(
+    db: Session,
+    exclude_session_id: Optional[str] = None,
+    limit: int = 4,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch recent questions from past interview sessions where the candidate struggled
+    (score <= 3 or technical_score <= 3 or detected mistakes), so the interviewer
+    remembers mistakes across sessions.
+    """
+    query = db.query(InterviewQuestion).filter(
+        InterviewQuestion.candidate_answer.isnot(None)
+    )
+    if exclude_session_id:
+        query = query.filter(InterviewQuestion.session_id != exclude_session_id)
+
+    recent_answered = (
+        query.order_by(InterviewQuestion.created_at.desc()).limit(25).all()
+    )
+
+    mistakes_list: List[Dict[str, Any]] = []
+    for q in recent_answered:
+        diag = analyze_speech_and_knowledge_gaps(
+            q.candidate_answer or "",
+            q.question_text or "",
+            q.category or "Technical",
+        )
+        is_weak = (q.score is not None and q.score <= 3) or (
+            q.technical_score is not None and q.technical_score <= 3
+        ) or bool(diag["mistakes"])
+        if is_weak:
+            mistakes_list.append(
+                {
+                    "question_text": q.question_text,
+                    "candidate_answer": q.candidate_answer,
+                    "score": q.score,
+                    "category": q.category,
+                    "feedback": q.feedback,
+                    "ideal_points": q.ideal_points,
+                    "mistakes": diag["mistakes"],
+                }
+            )
+            if len(mistakes_list) >= limit:
+                break
+
+    return mistakes_list
 
 
 @router.get("", response_model=List[InterviewSessionResponse])
@@ -41,7 +89,8 @@ def start_interview_session(
 ):
     """
     Initialize an adaptive mock interview session.
-    Extracts candidate profile from resume PDF and generates the initial interview question concurrently.
+    Extracts candidate profile from resume PDF, loads cross-session mistake memory,
+    and generates the initial interview question.
     """
     candidate_skills = []
     career_summary = ""
@@ -53,7 +102,6 @@ def start_interview_session(
             chunks = db.query(DocumentChunk).filter(DocumentChunk.document_id == resume_doc.id).all()
             resume_text = "\n\n".join(c.content for c in chunks)
 
-    # Fast seed skills so question 1 can be generated in parallel with profile extraction
     seed_skills = ["Python", "FastAPI", "Next.js", "TypeScript", "System Architecture"]
     if resume_text:
         found = [
@@ -65,6 +113,8 @@ def start_interview_session(
         ]
         if found:
             seed_skills = found[:6]
+
+    past_mistakes = _get_past_session_mistakes(db, exclude_session_id=None, limit=3)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         profile_future = (
@@ -78,7 +128,8 @@ def start_interview_session(
             seed_skills,
             1,
             "Medium",
-            []
+            [],
+            past_mistakes,
         )
 
         if profile_future:
@@ -91,7 +142,6 @@ def start_interview_session(
     if not candidate_skills:
         candidate_skills = seed_skills[:4]
 
-    # Create Session in DB
     session_id = str(uuid.uuid4())
     session = InterviewSession(
         id=session_id,
@@ -141,8 +191,8 @@ def submit_answer_and_progress(
     db: Session = Depends(get_db)
 ):
     """
-    Submit candidate answer (via voice or text), receive instant constructive evaluation,
-    and adaptively generate the next question based on performance.
+    Submit candidate answer (via voice or text), evaluate mistakes & filler words FIRST,
+    and then generate the next question specifically probing any mistake or omission made.
     """
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
@@ -155,56 +205,15 @@ def submit_answer_and_progress(
     if not question:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found in session.")
 
-    # Record answer
+    # 1. Record answer and evaluate FIRST so the next question generator sees the exact mistakes made!
     question.candidate_answer = payload.answer_text
-
-    # Check if more questions are needed
-    is_complete = (question.question_index >= session.total_target_questions)
-
-    # Estimate next difficulty quickly from answer length so next question can be generated concurrently
-    word_count = len(payload.answer_text.split())
-    estimated_next_diff = "Hard" if word_count >= 45 else ("Easy" if word_count < 15 else "Medium")
-
-    past_questions = db.query(InterviewQuestion).filter(
-        InterviewQuestion.session_id == session_id
-    ).order_by(InterviewQuestion.question_index).all()
-
-    history_payload = [
-        {
-            "index": q.question_index,
-            "difficulty": q.difficulty,
-            "question_text": q.question_text,
-            "score": q.score
-        }
-        for q in past_questions
-    ]
-    candidate_skills = json.loads(session.candidate_skills_json) if session.candidate_skills_json else []
-    next_idx = question.question_index + 1
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        eval_future = executor.submit(
-            InterviewService.evaluate_answer,
-            question.question_text,
-            question.difficulty,
-            question.category,
-            payload.answer_text,
-            session.job_title
-        )
-        next_q_future = (
-            executor.submit(
-                InterviewService.generate_next_question,
-                session.job_title,
-                session.job_description,
-                candidate_skills,
-                next_idx,
-                estimated_next_diff,
-                history_payload
-            )
-            if not is_complete else None
-        )
-
-        eval_result = eval_future.result()
-        next_q_data = next_q_future.result() if next_q_future else None
+    eval_result = InterviewService.evaluate_answer(
+        question.question_text,
+        question.difficulty,
+        question.category,
+        payload.answer_text,
+        session.job_title
+    )
 
     question.score = eval_result["overall_score"]
     question.technical_score = eval_result["technical_score"]
@@ -212,14 +221,60 @@ def submit_answer_and_progress(
     question.relevance_score = eval_result["relevance_score"]
     question.feedback = eval_result["feedback"]
     question.ideal_points = _ideal_str(eval_result.get("ideal_points", ""))
+    db.flush()
 
-    # Update difficulty for next question
-    next_diff = eval_result.get("suggested_next_difficulty", session.current_difficulty)
+    next_diff = eval_result.get("next_difficulty") or eval_result.get(
+        "suggested_next_difficulty", session.current_difficulty
+    )
     session.current_difficulty = next_diff
 
-    if not is_complete and next_q_data:
-        session.current_question_index = next_idx
+    is_complete = (question.question_index >= session.total_target_questions)
+    candidate_skills = json.loads(session.candidate_skills_json) if session.candidate_skills_json else []
+    next_idx = question.question_index + 1
 
+    if not is_complete:
+        # Gather full answered history IN THIS SESSION (including the question just graded!)
+        past_questions = db.query(InterviewQuestion).filter(
+            InterviewQuestion.session_id == session_id
+        ).order_by(InterviewQuestion.question_index).all()
+
+        history_payload = []
+        for q in past_questions:
+            diag = analyze_speech_and_knowledge_gaps(
+                q.candidate_answer or "",
+                q.question_text or "",
+                q.category or "Technical",
+            )
+            history_payload.append(
+                {
+                    "index": q.question_index,
+                    "difficulty": q.difficulty,
+                    "category": q.category,
+                    "question_text": q.question_text,
+                    "candidate_answer": q.candidate_answer,
+                    "score": q.score,
+                    "technical_score": q.technical_score,
+                    "feedback": q.feedback,
+                    "ideal_points": q.ideal_points,
+                    "mistakes": diag["mistakes"],
+                }
+            )
+
+        past_session_mistakes = _get_past_session_mistakes(
+            db, exclude_session_id=session_id, limit=3
+        )
+
+        next_q_data = InterviewService.generate_next_question(
+            session.job_title,
+            session.job_description,
+            candidate_skills,
+            next_idx,
+            next_diff,
+            history_payload,
+            past_session_mistakes,
+        )
+
+        session.current_question_index = next_idx
         next_q = InterviewQuestion(
             id=str(uuid.uuid4()),
             session_id=session_id,
@@ -231,7 +286,6 @@ def submit_answer_and_progress(
         )
         db.add(next_q)
     else:
-        # Complete session and compile final report
         session.state = "COMPLETED"
 
         all_questions = db.query(InterviewQuestion).filter(
@@ -309,7 +363,6 @@ def delete_interview_session(session_id: str, db: Session = Depends(get_db)):
     return {"message": "Interview session deleted successfully.", "id": session_id}
 
 
-# Helper formatters
 def _format_question_response(q: InterviewQuestion) -> InterviewQuestionResponse:
     return InterviewQuestionResponse(
         id=q.id,
